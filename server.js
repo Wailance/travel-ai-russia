@@ -837,7 +837,31 @@ app.post("/api/plan", async (req, res) => {
     };
     return res.json(normalized);
   } catch (error) {
-    return res.status(500).json({ error: error.message || "Ошибка сервера" });
+    const message = error?.message || "Ошибка сервера";
+    // Production-safe fallback: if provider is unreachable, return deterministic plan
+    // instead of hard failing the user flow.
+    if (/fetch failed|network|ECONN|ENOTFOUND|ETIMEDOUT/i.test(message)) {
+      const { days, startCity, endCity, budget, needAccommodation } = req.body || {};
+      const hasAccommodation = needAccommodation !== false;
+      let fallback = createFallbackPlan({ days, startCity, endCity, budget });
+      fallback = normalizePlan(fallback, budget, days, hasAccommodation);
+      const routePoints = (fallback.routePoints || []).filter(Boolean);
+      const logistics = await buildLogistics(routePoints);
+      fallback.logistics = logistics;
+      fallback = rebalanceBudgetByPreferences(fallback, {
+        days,
+        budget,
+        needAccommodation: hasAccommodation
+      });
+      fallback = await enrichPlanWithDayMaps(fallback);
+      fallback.generatedWith = "fallback";
+      fallback.tips = [
+        ...(fallback.tips || []),
+        "Источник AI временно недоступен, показан резервный маршрут."
+      ];
+      return res.json(fallback);
+    }
+    return res.status(500).json({ error: message });
   }
 });
 
