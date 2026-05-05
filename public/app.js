@@ -262,13 +262,15 @@ function renderLogistics(plan) {
     return;
   }
   segments.forEach((segment) => {
+    const sourceText =
+      segment.priceSource === "live" ? "лайв-тариф" : "оценка";
     const row = document.createElement("div");
     row.className = "log-row";
     row.innerHTML = `
       <div><strong>${segment.from}</strong> → <strong>${segment.to}</strong></div>
       <div>${segment.distanceKm} км</div>
       <div>${segment.durationHours} ч</div>
-      <div>${formatRub(segment.costEstimate)}</div>
+      <div>${formatRub(segment.costEstimate)}<br><span class="price-note">${sourceText}</span></div>
     `;
     logisticsEl.appendChild(row);
   });

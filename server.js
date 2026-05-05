@@ -87,6 +87,21 @@ const DEFAULT_CITY_COORDS = {
   "новосибирск": { lat: 55.0084, lon: 82.9357 }
 };
 
+const CITY_IATA = {
+  "москва": "MOW",
+  "санкт-петербург": "LED",
+  "санкт петербург": "LED",
+  "нижний новгород": "GOJ",
+  "казань": "KZN",
+  "екатеринбург": "SVX",
+  "сочи": "AER",
+  "новосибирск": "OVB",
+  "владимир": null,
+  "ярославль": null,
+  "сергиев посад": null,
+  "суздаль": null
+};
+
 function buildPrompt({ days, startCity, endCity, budget, needAccommodation }) {
   return `
 Ты — умный тревел-планировщик по России.
@@ -272,22 +287,67 @@ async function getDrivingMetrics(a, b) {
 
 function estimateByMode(distanceKm, mode) {
   if (mode === "plane") {
-    return { distanceKm, durationHours: distanceKm / 650 + 1.8 };
+    // Airport transfer, security and boarding noticeably add fixed time.
+    return { distanceKm, durationHours: distanceKm / 720 + 2.6 };
   }
   if (mode === "train") {
-    return { distanceKm, durationHours: distanceKm / 90 + 0.6 };
+    return { distanceKm, durationHours: distanceKm / 95 + 0.5 };
   }
   if (mode === "bus") {
-    return { distanceKm, durationHours: distanceKm / 58 + 0.4 };
+    return { distanceKm, durationHours: distanceKm / 55 + 0.4 };
   }
-  return { distanceKm, durationHours: distanceKm / 65 };
+  return { distanceKm, durationHours: distanceKm / 63 };
 }
 
 function estimateTransportCost(distanceKm, mode) {
-  if (mode === "plane") return Math.round(distanceKm * 8.2);
-  if (mode === "train") return Math.round(distanceKm * 3.2);
-  if (mode === "bus") return Math.round(distanceKm * 1.8);
-  return Math.round(distanceKm * 2.6);
+  if (mode === "plane") {
+    return Math.max(3500, Math.round(2600 + distanceKm * 6.8));
+  }
+  if (mode === "train") {
+    return Math.max(900, Math.round(500 + distanceKm * 2.9));
+  }
+  if (mode === "bus") {
+    return Math.max(550, Math.round(250 + distanceKm * 2.4));
+  }
+  // Car estimate: fuel + toll/parking buffer for intercity legs.
+  return Math.max(650, Math.round(distanceKm * 8.2));
+}
+
+function resolveIataByCity(city) {
+  return CITY_IATA[normalizeCityKey(city)] || null;
+}
+
+function addDaysIso(daysAhead = 14) {
+  const date = new Date();
+  date.setDate(date.getDate() + daysAhead);
+  return date.toISOString().slice(0, 10);
+}
+
+async function fetchLiveFlightPrice(fromCity, toCity, daysAhead = 14) {
+  const token = process.env.TRAVELPAYOUTS_TOKEN;
+  if (!token) return null;
+  const origin = resolveIataByCity(fromCity);
+  const destination = resolveIataByCity(toCity);
+  if (!origin || !destination) return null;
+  const departDate = addDaysIso(daysAhead).slice(0, 7);
+  const url =
+    `https://api.travelpayouts.com/v1/prices/cheap` +
+    `?origin=${encodeURIComponent(origin)}` +
+    `&destination=${encodeURIComponent(destination)}` +
+    `&depart_date=${encodeURIComponent(departDate)}` +
+    `&currency=rub&token=${encodeURIComponent(token)}`;
+
+  const response = await fetch(url, {
+    headers: { "User-Agent": "travel-ai-russia/1.0" }
+  });
+  if (!response.ok) return null;
+  const data = await response.json();
+  const destinationData = data?.data?.[destination];
+  if (!destinationData || typeof destinationData !== "object") return null;
+  const firstOffer = Object.values(destinationData)[0];
+  const bestPrice = Number(firstOffer?.price);
+  if (!Number.isFinite(bestPrice) || bestPrice <= 0) return null;
+  return Math.round(bestPrice);
 }
 
 function normalizeCityKey(city) {
@@ -300,8 +360,11 @@ function normalizeCityKey(city) {
 
 const INTERCITY_MODE_RULES = new Map([
   ["москва|санкт-петербург", "train"],
+  ["москва|владимир", "train"],
   ["москва|нижний новгород", "train"],
   ["москва|казань", "train"],
+  ["владимир|нижний новгород", "train"],
+  ["владимир|ярославль", "bus"],
   ["москва|сочи", "plane"],
   ["москва|екатеринбург", "plane"],
   ["москва|новосибирск", "plane"],
@@ -327,7 +390,21 @@ function pickIntercityMode(distanceKm) {
   return "car";
 }
 
+function estimateLocalTransportCost(city) {
+  const key = normalizeCityKey(city);
+  if (["москва", "санкт-петербург", "санкт петербург", "казань", "екатеринбург"].includes(key)) {
+    return 750;
+  }
+  return 550;
+}
+
 async function buildLogistics(routePoints) {
+  debugLog(
+    "server.js:buildLogistics:start",
+    "Build logistics started",
+    { routePointsCount: Array.isArray(routePoints) ? routePoints.length : 0, routePoints },
+    "H6"
+  );
   const points = [];
   const geocodeCache = new Map();
   for (const city of routePoints) {
@@ -346,6 +423,38 @@ async function buildLogistics(routePoints) {
     const mode = preferredMode || pickIntercityMode(baseDistanceKm);
     const metrics =
       mode === "car" && driving ? driving : estimateByMode(baseDistanceKm, mode);
+    let costEstimate = estimateTransportCost(metrics.distanceKm, mode);
+    let priceSource = "estimated";
+
+    if (mode === "plane") {
+      try {
+        const livePrice = await fetchLiveFlightPrice(from.city, to.city, 12 + i * 5);
+        if (Number.isFinite(livePrice) && livePrice > 0) {
+          costEstimate = livePrice;
+          priceSource = "live";
+        }
+      } catch (_) {
+        // Keep estimate if external live tariff source is unavailable.
+      }
+    }
+
+    debugLog(
+      "server.js:buildLogistics:segment",
+      "Segment calculated",
+      {
+        from: from.city,
+        to: to.city,
+        crowDistance: Number(crowDistance.toFixed(1)),
+        hasDrivingMetrics: Boolean(driving),
+        baseDistanceKm: Number(baseDistanceKm.toFixed(1)),
+        preferredMode,
+        chosenMode: mode,
+        durationHours: Number(metrics.durationHours.toFixed(2)),
+        costEstimate,
+        priceSource
+      },
+      "H7"
+    );
 
     segments.push({
       from: from.city,
@@ -353,10 +462,17 @@ async function buildLogistics(routePoints) {
       mode,
       distanceKm: Math.round(metrics.distanceKm),
       durationHours: Number(metrics.durationHours.toFixed(1)),
-      costEstimate: estimateTransportCost(metrics.distanceKm, mode)
+      costEstimate,
+      priceSource
     });
   }
 
+  debugLog(
+    "server.js:buildLogistics:done",
+    "Build logistics finished",
+    { pointsCount: points.length, segmentsCount: segments.length },
+    "H6"
+  );
   return { points, segments };
 }
 
@@ -567,9 +683,9 @@ function normalizePlan(plan, budgetLimit, daysLimit, needAccommodation) {
           item.priceStatus = "verified";
           item.priceNote = "Обычно бесплатно.";
         } else if (transportPattern.test(text)) {
-          item.cost = 1400;
+          item.cost = estimateLocalTransportCost(day.city);
           item.priceStatus = "estimated";
-          item.priceNote = "Ориентир по среднему тарифу переезда.";
+          item.priceNote = "Ориентир по городскому транспорту и локальным переездам.";
         } else if (hotelPattern.test(text)) {
           item.cost = 4600;
           item.priceStatus = "estimated";
@@ -589,6 +705,19 @@ function normalizePlan(plan, budgetLimit, daysLimit, needAccommodation) {
         }
       }
     }
+
+    const dayTotal = dayItems.reduce((sum, item) => sum + (Number(item.cost) || 0), 0);
+    debugLog(
+      "server.js:normalizePlan:day",
+      "Normalized day costs",
+      {
+        day: dayNumber,
+        city: day.city || null,
+        itemsCount: dayItems.length,
+        dayTotal
+      },
+      "H8"
+    );
 
     return {
       ...day,
@@ -633,7 +762,8 @@ function rebalanceBudgetByPreferences(plan, params) {
     (sum, s) => sum + Number(s.costEstimate || 0),
     0
   );
-  const transportBase = Math.max(logisticsCost, 9000);
+  const localCityTransport = Math.round(days * 500);
+  const transportBase = Math.max(logisticsCost + localCityTransport, Math.round(days * 700));
 
   let hotel = needAccommodation ? Math.round(hotelNight * days) : 0;
   let food = Math.round(foodDay * days);
@@ -651,6 +781,19 @@ function rebalanceBudgetByPreferences(plan, params) {
     reserve = Math.max(0, budgetLimit - (transport + hotel + food + activities));
     total = transport + hotel + food + activities + reserve;
   }
+
+  debugLog(
+    "server.js:rebalanceBudgetByPreferences",
+    "Budget rebalanced",
+    {
+      days,
+      budgetLimit,
+      needAccommodation,
+      logisticsCost,
+      budgetPlan: { transport, hotel, food, activities, reserve, total }
+    },
+    "H9"
+  );
 
   normalized.budgetPlan = {
     transport,
@@ -707,11 +850,28 @@ function estimateMinimumBudget({ days, startCity, endCity, needAccommodation }) 
   const from = DEFAULT_CITY_COORDS[(startCity || "").trim().toLowerCase()];
   const to = DEFAULT_CITY_COORDS[(endCity || "").trim().toLowerCase()];
   const intercityKm = from && to ? haversineKm(from, to) : 700;
-  const transport = Math.max(4500, Math.round(intercityKm * 3.2));
+  const intercityMode = pickIntercityMode(intercityKm);
+  const transportIntercity = estimateTransportCost(intercityKm, intercityMode);
+  const transportLocal = dayCount * 450;
+  const transport = transportIntercity + transportLocal;
   const hotel = withAccommodation ? dayCount * 2200 : 0;
   const food = dayCount * 1100;
   const activities = dayCount * 700;
-  return transport + hotel + food + activities;
+  const minimumBudget = transport + hotel + food + activities;
+  debugLog(
+    "server.js:estimateMinimumBudget",
+    "Estimated minimum budget",
+    {
+      dayCount,
+      startCity,
+      endCity,
+      withAccommodation,
+      intercityKm: Math.round(intercityKm),
+      minimumBudget
+    },
+    "H10"
+  );
+  return minimumBudget;
 }
 
 async function requestGigaChat(prompt) {
