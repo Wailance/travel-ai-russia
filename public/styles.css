@@ -25,7 +25,7 @@ body {
       rgba(0, 8, 24, 0.28),
       rgba(0, 8, 24, 0.68)
     ),
-    url("./hero-bg-reference.png")
+    url("./hero-bg-optimized.jpg")
       center / cover no-repeat;
   background-size: cover;
   background-position: center 38%;
