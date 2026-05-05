@@ -718,7 +718,8 @@ function createFallbackPlan({ days, startCity, endCity, budget }) {
 
   return {
     title: `Маршрут ${startCity} — ${endCity}`,
-    summary: "План собран в безопасном режиме, потому что модель вернула невалидный JSON.",
+    summary:
+      "Готов базовый маршрут на выбранный срок и бюджет: порядок дней, переезды, питание, активности и проживание.",
     budgetPlan: {
       transport: Math.round(Number(budget) * 0.35),
       hotel: Math.round(Number(budget) * 0.3),
@@ -865,7 +866,7 @@ app.post("/api/plan", async (req, res) => {
       fallback.generatedWith = "fallback";
       fallback.tips = [
         ...(fallback.tips || []),
-        "Источник AI временно недоступен, показан резервный маршрут."
+        "Маршрут собран автоматически по безопасному сценарию."
       ];
       return res.json(fallback);
     }
