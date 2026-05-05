@@ -21,13 +21,16 @@ body {
 .hero {
   min-height: 62vh;
   position: relative;
-  background-image: linear-gradient(
-      rgba(0, 8, 24, 0.48),
-      rgba(0, 8, 24, 0.9)
+  background: linear-gradient(
+      rgba(0, 8, 24, 0.28),
+      rgba(0, 8, 24, 0.68)
     ),
-    url("https://images.unsplash.com/photo-1467269204594-9661b134dd2b?auto=format&fit=crop&w=2000&q=80");
+    url("https://images.unsplash.com/photo-1467269204594-9661b134dd2b?auto=format&fit=crop&w=2400&q=80")
+      center / cover no-repeat;
   background-size: cover;
-  background-position: center;
+  background-position: center 38%;
+  background-repeat: no-repeat;
+  background-color: #061125;
   display: flex;
   flex-direction: column;
   justify-content: center;
