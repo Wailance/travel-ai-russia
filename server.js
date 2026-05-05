@@ -39,6 +39,24 @@ app.use(
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
+function debugLog(location, message, data, hypothesisId, runId = "baseline") {
+  // #region agent log
+  fetch("http://127.0.0.1:7473/ingest/f954c55e-7734-452b-9d4d-32a3cda1b5dd", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "db5575" },
+    body: JSON.stringify({
+      sessionId: "db5575",
+      runId,
+      hypothesisId,
+      location,
+      message,
+      data,
+      timestamp: Date.now()
+    })
+  }).catch(() => {});
+  // #endregion
+}
+
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 30,
@@ -778,6 +796,13 @@ async function getGigaChatAccessToken() {
 
 app.post("/api/plan", async (req, res) => {
   const { days, startCity, endCity, budget, needAccommodation } = req.body || {};
+  debugLog("server.js:/api/plan:start", "Incoming /api/plan request", {
+    days,
+    startCity,
+    endCity,
+    budget,
+    needAccommodation
+  }, "H1");
 
   if (!days || !startCity || !endCity || !budget) {
     return res.status(400).json({
@@ -793,6 +818,10 @@ app.post("/api/plan", async (req, res) => {
       needAccommodation
     });
     if (Number(budget) < minimumBudget) {
+      debugLog("server.js:/api/plan:low-budget", "Early low-budget stop", {
+        budget: Number(budget),
+        minimumBudget
+      }, "H3");
       return res.json({
         status: "budget_too_low",
         message:
@@ -844,6 +873,11 @@ app.post("/api/plan", async (req, res) => {
     normalized.preferences = {
       needAccommodation: hasAccommodation
     };
+    debugLog("server.js:/api/plan:success", "Plan response generated", {
+      generatedWith: normalized.generatedWith || "ai",
+      daysCount: Array.isArray(normalized.days) ? normalized.days.length : 0,
+      hasLogistics: Boolean(normalized.logistics?.segments?.length)
+    }, "H4");
     return res.json(normalized);
   } catch (error) {
     const message = error?.message || "Ошибка сервера";
@@ -864,18 +898,38 @@ app.post("/api/plan", async (req, res) => {
       });
       fallback = await enrichPlanWithDayMaps(fallback);
       fallback.generatedWith = "fallback";
+      fallback.fallbackReason = message;
       fallback.tips = [
         ...(fallback.tips || []),
         "Маршрут собран автоматически по безопасному сценарию."
       ];
+      debugLog("server.js:/api/plan:fallback", "Provider/network fallback used", {
+        error: message,
+        daysCount: Array.isArray(fallback.days) ? fallback.days.length : 0
+      }, "H2");
       return res.json(fallback);
     }
+    debugLog("server.js:/api/plan:error", "Unhandled /api/plan error", {
+      error: message
+    }, "H5");
     return res.status(500).json({ error: message });
   }
 });
 
 app.get("/api/health", (req, res) => {
   res.json({ ok: true });
+});
+
+app.get("/api/diag", (req, res) => {
+  res.json({
+    ok: true,
+    oauthMode: process.env.GIGACHAT_USE_OAUTH === "true",
+    insecureTls: process.env.GIGACHAT_INSECURE_TLS === "true",
+    hasToken: Boolean(process.env.GIGACHAT_TOKEN),
+    hasAuthKey: Boolean(process.env.GIGACHAT_AUTH_KEY),
+    frontendOrigin,
+    model: process.env.GIGACHAT_MODEL || "GigaChat"
+  });
 });
 
 app.get("*", (req, res) => {
