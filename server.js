@@ -3,6 +3,8 @@ const cors = require("cors");
 const dotenv = require("dotenv");
 const path = require("path");
 const crypto = require("crypto");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 
 dotenv.config();
 
@@ -12,10 +14,42 @@ if (process.env.GIGACHAT_INSECURE_TLS === "true") {
 
 const app = express();
 const port = process.env.PORT || 3000;
+const frontendOrigin =
+  process.env.FRONTEND_ORIGIN || "https://wailance.github.io";
 
-app.use(cors());
+app.set("trust proxy", 1);
+
+app.use(
+  helmet({
+    crossOriginResourcePolicy: false
+  })
+);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (origin === frontendOrigin || origin.startsWith("http://localhost:")) {
+        return callback(null, true);
+      }
+      return callback(new Error("CORS origin denied"));
+    }
+  })
+);
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: "Слишком много запросов. Попробуйте позже."
+  }
+});
+
+app.use("/api", apiLimiter);
 
 const DEFAULT_CITY_COORDS = {
   "москва": { lat: 55.7558, lon: 37.6176 },
@@ -807,8 +841,19 @@ app.post("/api/plan", async (req, res) => {
   }
 });
 
+app.get("/api/health", (req, res) => {
+  res.json({ ok: true });
+});
+
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+app.use((err, req, res, next) => {
+  if (err?.message === "CORS origin denied") {
+    return res.status(403).json({ error: "Доступ с этого домена запрещен." });
+  }
+  return next(err);
 });
 
 app.listen(port, () => {

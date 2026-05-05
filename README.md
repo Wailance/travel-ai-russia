@@ -64,3 +64,28 @@ window.TRAVEL_API_BASE = "https://your-backend.example.com";
 1. Разверните проект как Node.js сервис.
 2. Передайте переменные окружения из `.env`.
 3. Убедитесь, что публичный URL бэкенда доступен по `https://.../api/plan`.
+
+## Безопасный деплой (рекомендуется)
+
+### 1) Бэкенд на Render/Railway
+
+- Репозиторий можно оставить публичным: ключ хранится только в env-переменных хостинга.
+- Добавьте env в хостинг:
+  - `GIGACHAT_TOKEN` или `GIGACHAT_AUTH_KEY`
+  - `GIGACHAT_USE_OAUTH=true`
+  - `FRONTEND_ORIGIN=https://wailance.github.io`
+  - `GIGACHAT_INSECURE_TLS=false` (для production)
+
+### 2) Фронт на GitHub Pages
+
+- В `public/config.js` укажите URL вашего backend:
+
+```js
+window.TRAVEL_API_BASE = "https://your-backend.onrender.com";
+```
+
+### Что уже защищено в коде
+
+- `.env` игнорируется git и не публикуется.
+- CORS разрешает только `FRONTEND_ORIGIN` и `localhost`.
+- Rate limit на API: 30 запросов за 15 минут с IP.
