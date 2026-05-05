@@ -25,7 +25,7 @@ body {
       rgba(0, 8, 24, 0.28),
       rgba(0, 8, 24, 0.68)
     ),
-    url("https://images.unsplash.com/photo-1467269204594-9661b134dd2b?auto=format&fit=crop&w=2400&q=80")
+    url("./hero-bg.svg")
       center / cover no-repeat;
   background-size: cover;
   background-position: center 38%;

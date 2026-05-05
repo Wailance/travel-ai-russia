@@ -300,7 +300,8 @@ form.addEventListener("submit", async (event) => {
     startCity: document.getElementById("startCity").value.trim(),
     endCity: document.getElementById("endCity").value.trim(),
     budget: Number(document.getElementById("budget").value),
-    needAccommodation: document.getElementById("needAccommodation").checked
+    needAccommodation: document.getElementById("needAccommodation").checked,
+    hasOwnCar: document.getElementById("hasOwnCar").checked
   };
 
   try {
@@ -312,7 +313,8 @@ form.addEventListener("submit", async (event) => {
       startCity: payload.startCity,
       endCity: payload.endCity,
       budget: payload.budget,
-      needAccommodation: payload.needAccommodation
+      needAccommodation: payload.needAccommodation,
+      hasOwnCar: payload.hasOwnCar
     }, "H1");
     const response = await fetch(endpoint, {
       method: "POST",

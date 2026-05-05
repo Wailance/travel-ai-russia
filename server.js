@@ -102,7 +102,7 @@ const CITY_IATA = {
   "суздаль": null
 };
 
-function buildPrompt({ days, startCity, endCity, budget, needAccommodation }) {
+function buildPrompt({ days, startCity, endCity, budget, needAccommodation, hasOwnCar }) {
   return `
 Ты — умный тревел-планировщик по России.
 Сформируй маршрут строго в формате JSON без markdown и без пояснений вне JSON.
@@ -113,6 +113,7 @@ function buildPrompt({ days, startCity, endCity, budget, needAccommodation }) {
 - Город окончания: ${endCity}
 - Бюджет: ${budget} рублей
 - Нужно проживание: ${needAccommodation ? "да" : "нет"}
+- Есть свое авто: ${hasOwnCar ? "да" : "нет"}
 
 Верни JSON следующей структуры:
 {
@@ -413,7 +414,8 @@ function applyIntercityRealism(mode, rawMetrics, rawCostEstimate) {
   };
 }
 
-async function buildLogistics(routePoints) {
+async function buildLogistics(routePoints, options = {}) {
+  const hasOwnCar = options.hasOwnCar === true;
   debugLog(
     "server.js:buildLogistics:start",
     "Build logistics started",
@@ -435,7 +437,10 @@ async function buildLogistics(routePoints) {
     const driving = await getDrivingMetrics(from, to);
     const baseDistanceKm = driving?.distanceKm || crowDistance;
     const preferredMode = getPreferredModeByCities(from.city, to.city);
-    const mode = preferredMode || pickIntercityMode(baseDistanceKm);
+    let mode = preferredMode || pickIntercityMode(baseDistanceKm);
+    if (hasOwnCar) {
+      mode = baseDistanceKm > 1600 ? "plane" : "car";
+    }
     const rawMetrics =
       mode === "car" && driving ? driving : estimateByMode(baseDistanceKm, mode);
     let costEstimate = estimateTransportCost(rawMetrics.distanceKm, mode);
@@ -773,6 +778,7 @@ function rebalanceBudgetByPreferences(plan, params) {
   const days = Math.max(1, Number(params.days) || normalized.days?.length || 1);
   const budgetLimit = Math.max(1, Number(params.budget) || 1);
   const needAccommodation = params.needAccommodation !== false;
+  const hasOwnCar = params.hasOwnCar === true;
   const hotelNight = 4200;
   const foodDay = 1800;
   const activitiesDay = 1700;
@@ -781,7 +787,7 @@ function rebalanceBudgetByPreferences(plan, params) {
     (sum, s) => sum + Number(s.costEstimate || 0),
     0
   );
-  const localCityTransport = Math.round(days * 500);
+  const localCityTransport = hasOwnCar ? Math.round(days * 220) : Math.round(days * 500);
   const transportBase = Math.max(logisticsCost + localCityTransport, Math.round(days * 700));
 
   let hotel = needAccommodation ? Math.round(hotelNight * days) : 0;
@@ -863,15 +869,18 @@ function rebalanceBudgetByPreferences(plan, params) {
   return normalized;
 }
 
-function estimateMinimumBudget({ days, startCity, endCity, needAccommodation }) {
+function estimateMinimumBudget({ days, startCity, endCity, needAccommodation, hasOwnCar }) {
   const dayCount = Math.max(1, Number(days) || 1);
   const withAccommodation = needAccommodation !== false;
   const from = DEFAULT_CITY_COORDS[(startCity || "").trim().toLowerCase()];
   const to = DEFAULT_CITY_COORDS[(endCity || "").trim().toLowerCase()];
   const intercityKm = from && to ? haversineKm(from, to) : 700;
   const intercityMode = pickIntercityMode(intercityKm);
-  const transportIntercity = estimateTransportCost(intercityKm, intercityMode);
-  const transportLocal = dayCount * 450;
+  const ownCar = hasOwnCar === true;
+  const transportIntercity = ownCar
+    ? Math.max(900, Math.round(intercityKm * 6.5))
+    : estimateTransportCost(intercityKm, intercityMode);
+  const transportLocal = dayCount * (ownCar ? 220 : 450);
   const transport = transportIntercity + transportLocal;
   const hotel = withAccommodation ? dayCount * 2200 : 0;
   const food = dayCount * 1100;
@@ -1018,13 +1027,14 @@ async function getGigaChatAccessToken() {
 }
 
 app.post("/api/plan", async (req, res) => {
-  const { days, startCity, endCity, budget, needAccommodation } = req.body || {};
+  const { days, startCity, endCity, budget, needAccommodation, hasOwnCar } = req.body || {};
   debugLog("server.js:/api/plan:start", "Incoming /api/plan request", {
     days,
     startCity,
     endCity,
     budget,
-    needAccommodation
+    needAccommodation,
+    hasOwnCar
   }, "H1");
 
   if (!days || !startCity || !endCity || !budget) {
@@ -1038,7 +1048,8 @@ app.post("/api/plan", async (req, res) => {
       days,
       startCity,
       endCity,
-      needAccommodation
+      needAccommodation,
+      hasOwnCar
     });
     if (Number(budget) < minimumBudget) {
       debugLog("server.js:/api/plan:low-budget", "Early low-budget stop", {
@@ -1059,7 +1070,8 @@ app.post("/api/plan", async (req, res) => {
       startCity,
       endCity,
       budget,
-      needAccommodation
+      needAccommodation,
+      hasOwnCar
     });
     let parsed = null;
     let modelText = "";
@@ -1085,16 +1097,18 @@ app.post("/api/plan", async (req, res) => {
     const hasAccommodation = needAccommodation !== false;
     let normalized = normalizePlan(parsed, budget, days, hasAccommodation);
     const routePoints = (normalized.routePoints || []).filter(Boolean);
-    const logistics = await buildLogistics(routePoints);
+    const logistics = await buildLogistics(routePoints, { hasOwnCar });
     normalized.logistics = logistics;
     normalized = rebalanceBudgetByPreferences(normalized, {
       days,
       budget,
-      needAccommodation: hasAccommodation
+      needAccommodation: hasAccommodation,
+      hasOwnCar
     });
     normalized = await enrichPlanWithDayMaps(normalized);
     normalized.preferences = {
-      needAccommodation: hasAccommodation
+      needAccommodation: hasAccommodation,
+      hasOwnCar: Boolean(hasOwnCar)
     };
     debugLog("server.js:/api/plan:success", "Plan response generated", {
       generatedWith: normalized.generatedWith || "ai",
@@ -1107,17 +1121,18 @@ app.post("/api/plan", async (req, res) => {
     // Production-safe fallback: if provider is unreachable, return deterministic plan
     // instead of hard failing the user flow.
     if (/fetch failed|network|ECONN|ENOTFOUND|ETIMEDOUT/i.test(message)) {
-      const { days, startCity, endCity, budget, needAccommodation } = req.body || {};
+      const { days, startCity, endCity, budget, needAccommodation, hasOwnCar } = req.body || {};
       const hasAccommodation = needAccommodation !== false;
       let fallback = createFallbackPlan({ days, startCity, endCity, budget });
       fallback = normalizePlan(fallback, budget, days, hasAccommodation);
       const routePoints = (fallback.routePoints || []).filter(Boolean);
-      const logistics = await buildLogistics(routePoints);
+      const logistics = await buildLogistics(routePoints, { hasOwnCar });
       fallback.logistics = logistics;
       fallback = rebalanceBudgetByPreferences(fallback, {
         days,
         budget,
-        needAccommodation: hasAccommodation
+        needAccommodation: hasAccommodation,
+        hasOwnCar
       });
       fallback = await enrichPlanWithDayMaps(fallback);
       fallback.generatedWith = "fallback";
