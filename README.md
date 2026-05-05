@@ -89,3 +89,22 @@ window.TRAVEL_API_BASE = "https://your-backend.onrender.com";
 - `.env` игнорируется git и не публикуется.
 - CORS разрешает только `FRONTEND_ORIGIN` и `localhost`.
 - Rate limit на API: 30 запросов за 15 минут с IP.
+
+### Быстрый старт на Render (Blueprint)
+
+1. Откройте [Render Dashboard](https://dashboard.render.com/).
+2. `New` -> `Blueprint`.
+3. Подключите репозиторий `Wailance/travel-ai-russia`.
+4. Выберите ветку `split-frontend-backend`.
+5. Render прочитает `render.yaml` и создаст сервис `travel-ai-russia-api`.
+6. В `Environment` заполните один из секретов:
+   - `GIGACHAT_TOKEN`, или
+   - `GIGACHAT_AUTH_KEY`.
+7. Дождитесь статуса `Live` и скопируйте URL сервиса.
+8. В `public/config.js` укажите:
+
+```js
+window.TRAVEL_API_BASE = "https://<your-render-service>.onrender.com";
+```
+
+9. Закоммитьте `public/config.js` в ветку `split-frontend-backend`, чтобы GitHub Pages начал ходить в backend.

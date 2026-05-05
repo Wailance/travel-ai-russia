@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: travel-ai-russia-api
+    runtime: node
+    plan: free
+    branch: split-frontend-backend
+    rootDir: .
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: PORT
+        value: 3000
+      - key: GIGACHAT_USE_OAUTH
+        value: "true"
+      - key: GIGACHAT_INSECURE_TLS
+        value: "false"
+      - key: FRONTEND_ORIGIN
+        value: "https://wailance.github.io"
+      - key: GIGACHAT_MODEL
+        value: "GigaChat"
+      - key: GIGACHAT_API_URL
+        value: "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
+      - key: GIGACHAT_OAUTH_URL
+        value: "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+      - key: GIGACHAT_SCOPE
+        value: "GIGACHAT_API_PERS"
+      - key: GIGACHAT_TOKEN
+        sync: false
+      - key: GIGACHAT_AUTH_KEY
+        sync: false
