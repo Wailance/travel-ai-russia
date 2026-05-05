@@ -489,31 +489,39 @@ function normalizePlan(plan, budgetLimit, daysLimit, needAccommodation) {
         item.priceNote = "Проверьте цену за ночь на сайте отеля.";
       }
 
+      const text = `${place} ${item.comment || ""}`.toLowerCase();
       const freePattern =
-        /(красн(ая|ой)\s+площад|парк|набережн|кремл(ь|я)\s+снаружи|прогулк|собор\s+снаружи|улиц|сквер)/i;
-      const foodPattern = /(ресторан|кафе|обед|ужин|завтрак|бистро|пицц|бар|фуд|столов)/i;
-      const hotelPattern = /(отел|гостиниц|апартамент|хостел|ночлег|размещени)/i;
-      const transportPattern = /(поезд|самолет|автобус|метро|такси|трансфер|переезд|вокзал)/i;
+        /(красн(ая|ой)\s+площад|парк|набережн|кремл(ь|я)\s+снаружи|прогулк|улиц|сквер|смотров)/i;
+      const foodPattern =
+        /(ресторан|кафе|обед|ужин|завтрак|бистро|пицц|бар|фуд|столов|marketplace|депо|варенич|джонджоли|брынза|теремок|pkhali)/i;
+      const hotelPattern =
+        /(отел|гостиниц|апартамент|хостел|ночлег|размещени|hotel|inn|azimut|ibis|cosmos|amaks|station|holiday)/i;
+      const transportPattern = /(транспорт|поезд|самолет|автобус|метро|такси|трансфер|переезд|вокзал)/i;
+      const activityPattern = /(активност|экскурс|музе|собор|лавр|кремл|дворец|галере|театр|крепост|достопримеч)/i;
 
       if (item.cost == null) {
-        if (freePattern.test(place)) {
+        if (freePattern.test(text)) {
           item.cost = 0;
           item.priceStatus = "verified";
           item.priceNote = "Обычно бесплатно.";
-        } else if (foodPattern.test(place)) {
-          item.cost = 900;
+        } else if (transportPattern.test(text)) {
+          item.cost = 1400;
           item.priceStatus = "estimated";
-          item.priceNote = "Ориентир по среднему чеку.";
-        } else if (hotelPattern.test(place)) {
-          item.cost = 4200;
+          item.priceNote = "Ориентир по среднему тарифу переезда.";
+        } else if (hotelPattern.test(text)) {
+          item.cost = 4600;
           item.priceStatus = "estimated";
           item.priceNote = "Ориентир за ночь в стандартном размещении.";
-        } else if (transportPattern.test(place)) {
-          item.cost = 1200;
+        } else if (foodPattern.test(text)) {
+          item.cost = 1100;
           item.priceStatus = "estimated";
-          item.priceNote = "Ориентир по межгородскому/городскому тарифу.";
+          item.priceNote = "Ориентир по среднему чеку.";
+        } else if (activityPattern.test(text)) {
+          item.cost = 850;
+          item.priceStatus = "estimated";
+          item.priceNote = "Ориентир по билету/входу.";
         } else {
-          item.cost = 700;
+          item.cost = 750 + index * 120;
           item.priceStatus = "estimated";
           item.priceNote = "Ориентировочная стоимость активности.";
         }
