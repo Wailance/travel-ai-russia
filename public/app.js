@@ -14,6 +14,7 @@ const budgetRealityEl = document.getElementById("budgetReality");
 const tipsEl = document.getElementById("tips");
 const mapWrapEl = document.getElementById("mapWrap");
 const logisticsEl = document.getElementById("logistics");
+const chartsEl = document.getElementById("charts");
 
 function getApiBaseUrl() {
   const configured = (window.TRAVEL_API_BASE || "").trim();
@@ -21,11 +22,112 @@ function getApiBaseUrl() {
   return "";
 }
 
+function debugLog(location, message, data, hypothesisId, runId = "baseline") {
+  // #region agent log
+  fetch("http://127.0.0.1:7473/ingest/f954c55e-7734-452b-9d4d-32a3cda1b5dd", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "db5575" },
+    body: JSON.stringify({
+      sessionId: "db5575",
+      runId,
+      hypothesisId,
+      location,
+      message,
+      data,
+      timestamp: Date.now()
+    })
+  }).catch(() => {});
+  // #endregion
+}
+
 function formatRub(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return "—";
   if (num === 0) return "Бесплатно";
   return `${num.toLocaleString("ru-RU")} ₽`;
+}
+
+function normalizeCityName(city) {
+  return String(city || "").trim().toLowerCase();
+}
+
+function findSegmentBetweenCities(segments, fromCity, toCity) {
+  const fromNorm = normalizeCityName(fromCity);
+  const toNorm = normalizeCityName(toCity);
+  return (segments || []).find(
+    (segment) =>
+      normalizeCityName(segment.from) === fromNorm && normalizeCityName(segment.to) === toNorm
+  );
+}
+
+function getTransportIcon(mode) {
+  const value = String(mode || "").toLowerCase();
+  if (value.includes("plane") || value.includes("flight")) return "✈️";
+  if (value.includes("train")) return "🚆";
+  if (value.includes("bus")) return "🚌";
+  return "🚗";
+}
+
+function getDayTotal(day) {
+  return (day.items || []).reduce((sum, item) => {
+    const cost = Number(item.cost);
+    return Number.isFinite(cost) ? sum + cost : sum;
+  }, 0);
+}
+
+function renderCharts(plan) {
+  if (!chartsEl) return;
+  const budget = plan.budgetPlan || {};
+  const total = Number(budget.total) || 0;
+  const budgetParts = [
+    { label: "Транспорт", value: Number(budget.transport) || 0, color: "#7ac0ff" },
+    { label: "Проживание", value: Number(budget.hotel) || 0, color: "#8de1b8" },
+    { label: "Питание", value: Number(budget.food) || 0, color: "#ffd27a" },
+    { label: "Активности", value: Number(budget.activities) || 0, color: "#f5a9ff" },
+    { label: "Резерв", value: Number(budget.reserve) || 0, color: "#b3bafc" }
+  ];
+
+  const budgetMarkup = budgetParts
+    .map((part) => {
+      const percent = total > 0 ? Math.round((part.value / total) * 100) : 0;
+      return `
+        <div class="chart-row">
+          <div class="chart-label">${part.label}</div>
+          <div class="chart-bar"><span style="width:${percent}%; background:${part.color};"></span></div>
+          <div class="chart-value">${formatRub(part.value)} (${percent}%)</div>
+        </div>
+      `;
+    })
+    .join("");
+
+  const dayTotals = (plan.days || []).map((day) => ({
+    label: day.dateLabel || `День ${day.day}`,
+    city: day.city || "",
+    value: getDayTotal(day)
+  }));
+  const maxDayTotal = Math.max(...dayTotals.map((d) => d.value), 1);
+  const daysMarkup = dayTotals
+    .map(
+      (day) => `
+        <div class="chart-day">
+          <div class="chart-day-header">${day.label} — ${day.city}</div>
+          <div class="chart-day-bar"><span style="width:${Math.max(8, Math.round((day.value / maxDayTotal) * 100))}%;"></span></div>
+          <div class="chart-day-value">${formatRub(day.value)}</div>
+        </div>
+      `
+    )
+    .join("");
+
+  chartsEl.innerHTML = `
+    <div class="chart-block">
+      <h4>Распределение бюджета</h4>
+      ${budgetMarkup}
+    </div>
+    <div class="chart-block">
+      <h4>Расходы по дням</h4>
+      ${daysMarkup}
+    </div>
+  `;
 }
 
 function renderPlan(plan) {
@@ -48,8 +150,26 @@ function renderPlan(plan) {
   renderMap(plan.logistics);
 
   scheduleEl.innerHTML = "";
+  const logisticsSegments = plan.logistics?.segments || [];
+  let previousDay = null;
 
   (plan.days || []).forEach((day) => {
+    if (previousDay && normalizeCityName(previousDay.city) !== normalizeCityName(day.city)) {
+      const transfer = document.createElement("div");
+      transfer.className = "day-transfer";
+      const segment = findSegmentBetweenCities(logisticsSegments, previousDay.city, day.city);
+      const icon = getTransportIcon(segment?.mode);
+      const transferDetails = segment
+        ? `${segment.distanceKm} км • ${segment.durationHours} ч • ${formatRub(segment.costEstimate)}`
+        : "Переезд между городами запланирован";
+      transfer.innerHTML = `
+        <div class="day-transfer-title">Маршрут между днями</div>
+        <div class="day-transfer-main"><span class="transfer-icon">${icon}</span> <strong>${previousDay.city}</strong> → <strong>${day.city}</strong></div>
+        <div class="day-transfer-meta">${transferDetails}</div>
+      `;
+      scheduleEl.appendChild(transfer);
+    }
+
     const dayBlock = document.createElement("div");
     dayBlock.className = "day";
 
@@ -71,6 +191,7 @@ function renderPlan(plan) {
     });
 
     scheduleEl.appendChild(dayBlock);
+    previousDay = day;
   });
 
   const budget = plan.budgetPlan || {};
@@ -92,6 +213,7 @@ function renderPlan(plan) {
     li.textContent = tip;
     tipsEl.appendChild(li);
   });
+  renderCharts(plan);
 
 }
 
@@ -109,6 +231,7 @@ function renderLowBudget(data) {
   budgetEl.innerHTML = "";
   budgetRealityEl.textContent = "";
   tipsEl.innerHTML = "";
+  if (chartsEl) chartsEl.innerHTML = "";
 }
 
 function renderMap(logistics) {
@@ -168,12 +291,25 @@ form.addEventListener("submit", async (event) => {
   try {
     const apiBase = getApiBaseUrl();
     const endpoint = apiBase ? `${apiBase}/api/plan` : "/api/plan";
+    debugLog("public/app.js:submit", "Submitting plan request", {
+      endpoint,
+      days: payload.days,
+      startCity: payload.startCity,
+      endCity: payload.endCity,
+      budget: payload.budget,
+      needAccommodation: payload.needAccommodation
+    }, "H1");
     const response = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
     const rawText = await response.text();
+    debugLog("public/app.js:response", "Received response", {
+      status: response.status,
+      ok: response.ok,
+      preview: rawText.slice(0, 180)
+    }, "H2");
     let data = null;
     try {
       data = rawText ? JSON.parse(rawText) : {};
@@ -186,11 +322,20 @@ form.addEventListener("submit", async (event) => {
     }
 
     if (data.status === "budget_too_low") {
+      debugLog("public/app.js:budget_too_low", "Low budget branch", {
+        providedBudget: data.providedBudget,
+        minReasonable: data.minReasonable
+      }, "H3");
       renderLowBudget(data);
       statusEl.textContent = "Маршрут не построен: бюджет слишком низкий.";
       return;
     }
 
+    debugLog("public/app.js:render", "Rendering plan", {
+      generatedWith: data.generatedWith || "ai",
+      days: Array.isArray(data.days) ? data.days.length : 0,
+      hasLogistics: Boolean(data.logistics?.segments?.length)
+    }, "H4");
     renderPlan(data);
     renderLogistics(data);
     statusEl.textContent = "Маршрут готов.";
