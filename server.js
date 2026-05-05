@@ -277,13 +277,54 @@ function estimateByMode(distanceKm, mode) {
   if (mode === "train") {
     return { distanceKm, durationHours: distanceKm / 90 + 0.6 };
   }
+  if (mode === "bus") {
+    return { distanceKm, durationHours: distanceKm / 58 + 0.4 };
+  }
   return { distanceKm, durationHours: distanceKm / 65 };
 }
 
 function estimateTransportCost(distanceKm, mode) {
   if (mode === "plane") return Math.round(distanceKm * 8.2);
   if (mode === "train") return Math.round(distanceKm * 3.2);
+  if (mode === "bus") return Math.round(distanceKm * 1.8);
   return Math.round(distanceKm * 2.6);
+}
+
+function normalizeCityKey(city) {
+  return String(city || "")
+    .trim()
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .replace(/\s+/g, " ");
+}
+
+const INTERCITY_MODE_RULES = new Map([
+  ["москва|санкт-петербург", "train"],
+  ["москва|нижний новгород", "train"],
+  ["москва|казань", "train"],
+  ["москва|сочи", "plane"],
+  ["москва|екатеринбург", "plane"],
+  ["москва|новосибирск", "plane"],
+  ["санкт-петербург|сочи", "plane"],
+  ["санкт-петербург|екатеринбург", "plane"],
+  ["санкт-петербург|новосибирск", "plane"],
+  ["екатеринбург|новосибирск", "plane"]
+]);
+
+function getPreferredModeByCities(fromCity, toCity) {
+  const from = normalizeCityKey(fromCity);
+  const to = normalizeCityKey(toCity);
+  if (!from || !to) return null;
+  const direct = `${from}|${to}`;
+  const reverse = `${to}|${from}`;
+  return INTERCITY_MODE_RULES.get(direct) || INTERCITY_MODE_RULES.get(reverse) || null;
+}
+
+function pickIntercityMode(distanceKm) {
+  if (distanceKm >= 1200) return "plane";
+  if (distanceKm >= 350) return "train";
+  if (distanceKm >= 120) return "bus";
+  return "car";
 }
 
 async function buildLogistics(routePoints) {
@@ -301,15 +342,18 @@ async function buildLogistics(routePoints) {
     const crowDistance = haversineKm(from, to);
     const driving = await getDrivingMetrics(from, to);
     const baseDistanceKm = driving?.distanceKm || crowDistance;
-    const metrics = driving || estimateByMode(baseDistanceKm, "train");
+    const preferredMode = getPreferredModeByCities(from.city, to.city);
+    const mode = preferredMode || pickIntercityMode(baseDistanceKm);
+    const metrics =
+      mode === "car" && driving ? driving : estimateByMode(baseDistanceKm, mode);
 
     segments.push({
       from: from.city,
       to: to.city,
-      mode: driving ? "car" : "train",
+      mode,
       distanceKm: Math.round(metrics.distanceKm),
       durationHours: Number(metrics.durationHours.toFixed(1)),
-      costEstimate: estimateTransportCost(metrics.distanceKm, "train")
+      costEstimate: estimateTransportCost(metrics.distanceKm, mode)
     });
   }
 
