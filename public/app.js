@@ -68,6 +68,14 @@ function getTransportIcon(mode) {
   return "🚗";
 }
 
+function getTransportLabel(mode) {
+  const value = String(mode || "").toLowerCase();
+  if (value.includes("plane") || value.includes("flight")) return "самолет";
+  if (value.includes("train")) return "поезд";
+  if (value.includes("bus")) return "автобус";
+  return "авто";
+}
+
 function getDayTotal(day) {
   return (day.items || []).reduce((sum, item) => {
     const cost = Number(item.cost);
@@ -159,8 +167,12 @@ function renderPlan(plan) {
       transfer.className = "day-transfer";
       const segment = findSegmentBetweenCities(logisticsSegments, previousDay.city, day.city);
       const icon = getTransportIcon(segment?.mode);
+      const modeLabel = getTransportLabel(segment?.mode);
+      const sourceLabel = segment?.priceSource === "live" ? "лайв-тариф" : "оценка";
       const transferDetails = segment
-        ? `${segment.distanceKm} км • ${segment.durationHours} ч • ${formatRub(segment.costEstimate)}`
+        ? `${modeLabel} • ${segment.distanceKm} км • ${segment.durationHours} ч • ${formatRub(
+            segment.costEstimate
+          )} • ${sourceLabel}`
         : "Переезд между городами запланирован";
       transfer.innerHTML = `
         <div class="day-transfer-title">Маршрут между днями</div>
@@ -264,11 +276,12 @@ function renderLogistics(plan) {
   segments.forEach((segment) => {
     const sourceText =
       segment.priceSource === "live" ? "лайв-тариф" : "оценка";
+    const modeText = getTransportLabel(segment.mode);
     const row = document.createElement("div");
     row.className = "log-row";
     row.innerHTML = `
       <div><strong>${segment.from}</strong> → <strong>${segment.to}</strong></div>
-      <div>${segment.distanceKm} км</div>
+      <div>${modeText}<br><span class="price-note">${segment.distanceKm} км</span></div>
       <div>${segment.durationHours} ч</div>
       <div>${formatRub(segment.costEstimate)}<br><span class="price-note">${sourceText}</span></div>
     `;

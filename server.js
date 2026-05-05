@@ -288,15 +288,15 @@ async function getDrivingMetrics(a, b) {
 function estimateByMode(distanceKm, mode) {
   if (mode === "plane") {
     // Airport transfer, security and boarding noticeably add fixed time.
-    return { distanceKm, durationHours: distanceKm / 720 + 2.6 };
+    return { distanceKm, durationHours: distanceKm / 690 + 3.2 };
   }
   if (mode === "train") {
-    return { distanceKm, durationHours: distanceKm / 95 + 0.5 };
+    return { distanceKm, durationHours: distanceKm / 80 + 1.2 };
   }
   if (mode === "bus") {
-    return { distanceKm, durationHours: distanceKm / 55 + 0.4 };
+    return { distanceKm, durationHours: distanceKm / 48 + 0.9 };
   }
-  return { distanceKm, durationHours: distanceKm / 63 };
+  return { distanceKm, durationHours: distanceKm / 56 + 0.35 };
 }
 
 function estimateTransportCost(distanceKm, mode) {
@@ -304,13 +304,13 @@ function estimateTransportCost(distanceKm, mode) {
     return Math.max(3500, Math.round(2600 + distanceKm * 6.8));
   }
   if (mode === "train") {
-    return Math.max(900, Math.round(500 + distanceKm * 2.9));
+    return Math.max(1200, Math.round(700 + distanceKm * 3.5));
   }
   if (mode === "bus") {
-    return Math.max(550, Math.round(250 + distanceKm * 2.4));
+    return Math.max(700, Math.round(320 + distanceKm * 2.8));
   }
   // Car estimate: fuel + toll/parking buffer for intercity legs.
-  return Math.max(650, Math.round(distanceKm * 8.2));
+  return Math.max(900, Math.round(420 + distanceKm * 10.2));
 }
 
 function resolveIataByCity(city) {
@@ -393,9 +393,24 @@ function pickIntercityMode(distanceKm) {
 function estimateLocalTransportCost(city) {
   const key = normalizeCityKey(city);
   if (["москва", "санкт-петербург", "санкт петербург", "казань", "екатеринбург"].includes(key)) {
-    return 750;
+    return 900;
   }
-  return 550;
+  return 700;
+}
+
+function applyIntercityRealism(mode, rawMetrics, rawCostEstimate) {
+  const distanceKm = Number(rawMetrics.distanceKm || 0);
+  const baseDuration = Number(rawMetrics.durationHours || 0);
+  const extraByMode =
+    mode === "plane" ? 0.6 : mode === "train" ? 0.4 : mode === "bus" ? 0.3 : 0.25;
+  const adjustedDuration = Math.max(baseDuration + extraByMode, distanceKm / 75);
+  const costFloorByMode =
+    mode === "plane" ? 3500 : mode === "train" ? 1200 : mode === "bus" ? 700 : 900;
+  return {
+    distanceKm,
+    durationHours: adjustedDuration,
+    costEstimate: Math.max(costFloorByMode, Math.round(rawCostEstimate))
+  };
 }
 
 async function buildLogistics(routePoints) {
@@ -421,9 +436,9 @@ async function buildLogistics(routePoints) {
     const baseDistanceKm = driving?.distanceKm || crowDistance;
     const preferredMode = getPreferredModeByCities(from.city, to.city);
     const mode = preferredMode || pickIntercityMode(baseDistanceKm);
-    const metrics =
+    const rawMetrics =
       mode === "car" && driving ? driving : estimateByMode(baseDistanceKm, mode);
-    let costEstimate = estimateTransportCost(metrics.distanceKm, mode);
+    let costEstimate = estimateTransportCost(rawMetrics.distanceKm, mode);
     let priceSource = "estimated";
 
     if (mode === "plane") {
@@ -438,6 +453,9 @@ async function buildLogistics(routePoints) {
       }
     }
 
+    const adjusted = applyIntercityRealism(mode, rawMetrics, costEstimate);
+    costEstimate = adjusted.costEstimate;
+
     debugLog(
       "server.js:buildLogistics:segment",
       "Segment calculated",
@@ -449,7 +467,8 @@ async function buildLogistics(routePoints) {
         baseDistanceKm: Number(baseDistanceKm.toFixed(1)),
         preferredMode,
         chosenMode: mode,
-        durationHours: Number(metrics.durationHours.toFixed(2)),
+        durationHoursRaw: Number(rawMetrics.durationHours.toFixed(2)),
+        durationHoursAdjusted: Number(adjusted.durationHours.toFixed(2)),
         costEstimate,
         priceSource
       },
@@ -460,8 +479,8 @@ async function buildLogistics(routePoints) {
       from: from.city,
       to: to.city,
       mode,
-      distanceKm: Math.round(metrics.distanceKm),
-      durationHours: Number(metrics.durationHours.toFixed(1)),
+      distanceKm: Math.round(adjusted.distanceKm),
+      durationHours: Number(adjusted.durationHours.toFixed(1)),
       costEstimate,
       priceSource
     });
