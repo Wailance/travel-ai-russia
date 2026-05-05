@@ -15,6 +15,12 @@ const tipsEl = document.getElementById("tips");
 const mapWrapEl = document.getElementById("mapWrap");
 const logisticsEl = document.getElementById("logistics");
 
+function getApiBaseUrl() {
+  const configured = (window.TRAVEL_API_BASE || "").trim();
+  if (configured) return configured.replace(/\/+$/, "");
+  return "";
+}
+
 function formatRub(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return "—";
@@ -160,7 +166,9 @@ form.addEventListener("submit", async (event) => {
   };
 
   try {
-    const response = await fetch("/api/plan", {
+    const apiBase = getApiBaseUrl();
+    const endpoint = apiBase ? `${apiBase}/api/plan` : "/api/plan";
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)

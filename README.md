@@ -41,3 +41,26 @@ npm run dev
 - валидацию схемы (например, через `zod`);
 - retry/backoff;
 - кэширование и логирование запросов.
+
+## Отдельный фронт и бэкенд
+
+Можно разделить деплой:
+
+- фронт (статический) на GitHub Pages;
+- бэкенд (`server.js`) на Render/Railway.
+
+### Фронт на GitHub Pages
+
+1. В корне уже есть `index.html` (использует файлы из `public`).
+2. В репозитории включите GitHub Pages (`Settings` -> `Pages` -> `Deploy from branch`, branch `main`, folder `/root`).
+3. Опционально в `public/config.js` задайте адрес API:
+
+```js
+window.TRAVEL_API_BASE = "https://your-backend.example.com";
+```
+
+### Бэкенд отдельно
+
+1. Разверните проект как Node.js сервис.
+2. Передайте переменные окружения из `.env`.
+3. Убедитесь, что публичный URL бэкенда доступен по `https://.../api/plan`.
