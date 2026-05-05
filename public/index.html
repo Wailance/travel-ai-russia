@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI-путешествия по России</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="hero-content">
+        <h1>РОССИЯ</h1>
+        <p>AI-маршрут под ваш срок и бюджет</p>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="form-section card">
+        <h2>Параметры поездки</h2>
+        <form id="plannerForm">
+          <div class="grid">
+            <label>
+              Срок (дней)
+              <input id="days" type="number" min="1" max="30" value="3" required />
+            </label>
+            <label>
+              Город старта
+              <input id="startCity" type="text" value="Москва" required />
+            </label>
+            <label>
+              Город окончания
+              <input id="endCity" type="text" value="Санкт-Петербург" required />
+            </label>
+            <label>
+              Бюджет (руб.)
+              <input id="budget" type="number" min="1000" step="1000" value="50000" required />
+            </label>
+            <label class="check-row">
+              <input id="needAccommodation" type="checkbox" checked />
+              Нужно проживание
+            </label>
+          </div>
+          <button id="submitBtn" type="submit">Построить маршрут</button>
+        </form>
+        <p id="status" class="status"></p>
+      </section>
+
+      <section id="result" class="result hidden">
+        <article id="lowBudgetBlock" class="card hidden">
+          <h3>Маршрут не построен</h3>
+          <p id="lowBudgetText"></p>
+          <img
+            class="sad-img"
+            src="https://images.unsplash.com/photo-1517849845537-4d257902454a?auto=format&fit=crop&w=1200&q=80"
+            alt="Грустная иллюстрация"
+          />
+        </article>
+
+        <article class="card">
+          <h2 id="routeTitle">Ваш маршрут</h2>
+          <p id="routeSummary"></p>
+        </article>
+
+        <article class="card" id="path">
+          <h3>Наш путь</h3>
+          <div class="path-layout">
+            <div id="routePoints" class="route-points"></div>
+            <div id="mapWrap" class="map-wrap"></div>
+          </div>
+        </article>
+
+        <article class="card" id="route">
+          <h3>Расписание тура</h3>
+          <div id="schedule" class="schedule"></div>
+        </article>
+
+        <article class="card">
+          <h3>Логистика (реальные расстояния/время)</h3>
+          <div id="logistics" class="logistics"></div>
+        </article>
+
+        <article class="card">
+          <h3>Бюджет</h3>
+          <p id="budgetReality" class="budget-reality"></p>
+          <div id="budgetPlan" class="budget"></div>
+        </article>
+
+        <article class="card">
+          <h3>Советы</h3>
+          <ul id="tips"></ul>
+        </article>
+      </section>
+    </main>
+    <footer id="contacts" class="footer">Travel AI Russia</footer>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
