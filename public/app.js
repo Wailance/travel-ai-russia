@@ -173,7 +173,13 @@ form.addEventListener("submit", async (event) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
-    const data = await response.json();
+    const rawText = await response.text();
+    let data = null;
+    try {
+      data = rawText ? JSON.parse(rawText) : {};
+    } catch (_) {
+      data = { error: rawText || "Сервер вернул не-JSON ответ." };
+    }
 
     if (!response.ok) {
       throw new Error(data.error || "Ошибка при генерации маршрута");
