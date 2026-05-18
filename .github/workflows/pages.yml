@@ -1,9 +1,17 @@
 name: Deploy GitHub Pages
 
+# Сайт скрыт: автодеплой отключён. Полный сайт — удалите .site-hidden и запустите workflow вручную.
 on:
-  push:
-    branches: [split-frontend-backend, main]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Опубликовать полный сайт (false = только заглушка)"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 permissions:
   contents: read
@@ -26,10 +34,21 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
+      - name: Choose artifact path
+        id: artifact
+        run: |
+          if [ "${{ inputs.publish }}" = "true" ] && [ ! -f .site-hidden ]; then
+            echo "path=." >> "$GITHUB_OUTPUT"
+            echo "Publishing full site"
+          else
+            echo "path=site-hidden" >> "$GITHUB_OUTPUT"
+            echo "Publishing hidden stub"
+          fi
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: ${{ steps.artifact.outputs.path }}
 
       - name: Deploy to GitHub Pages
         id: deployment
