@@ -1,0 +1,40 @@
+ЛОКАЛЬНЫЙ ЗАПУСК — TRAVEL AI RUSSIA
+================================
+
+1. Node.js 20+, интернет, ключ GigaChat (developers.sber.ru/studio).
+
+2. Распакуйте архив, перейдите в папку travel-ai-russia.
+
+3. npm install
+
+4. В архиве уже есть .env с ключом. Или: cp .env.example .env и вставьте GIGACHAT_AUTH_KEY.
+   GIGACHAT_USE_OAUTH=true
+   GIGACHAT_DEMO_MODE=false  (true — без AI, только заглушка)
+
+5. public/config.js — для локального запуска:
+   window.TRAVEL_API_BASE = "";
+
+6. npm start
+   Откройте http://localhost:3000 (не файл index.html из Finder).
+
+НОВОЕ В ВЕРСИИ
+--------------
+- Количество посещаемых городов (2–10)
+- Цели поездки: до 3 из 14 (гастрономия, православие, культура и др.)
+- Сбалансированный маршрут — отдельная цель
+- Карта маршрута: Leaflet + OpenStreetMap
+
+ЦЕЛИ ПОЕЗДКИ (выбор до 3)
+-------------------------
+balanced, landmarks, culture, gastronomy, orthodox, nature, family,
+romantic, active, shopping, photo, history, nightlife
+
+ОШИБКИ
+------
+Failed to fetch     -> npm start + localhost:3000 + пустой TRAVEL_API_BASE
+OAuth 401 code 6    -> новый GIGACHAT_AUTH_KEY, scope GIGACHAT_API_PERS
+Мало бюджета        -> увеличить бюджет в форме
+
+Остановка: Ctrl+C в терминале с сервером.
+
+Подробнее: LOCAL_SETUP_RU.md, README.md, ARCHITECTURE_RU.md

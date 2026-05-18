@@ -15,8 +15,118 @@ const tipsEl = document.getElementById("tips");
 const mapWrapEl = document.getElementById("mapWrap");
 const logisticsEl = document.getElementById("logistics");
 const chartsEl = document.getElementById("charts");
+const daysInput = document.getElementById("days");
+const cityCountInput = document.getElementById("cityCount");
+let routeMapInstance = null;
+const MAX_TRIP_GOALS = 3;
+const tripGoalsRoot = document.getElementById("tripGoals");
+const tripGoalsHint = document.getElementById("tripGoalsHint");
+
+function getTripGoalInputs() {
+  if (!tripGoalsRoot) return [];
+  return Array.from(tripGoalsRoot.querySelectorAll('input[name="tripGoal"]'));
+}
+
+function getSelectedTripGoals() {
+  return getTripGoalInputs()
+    .filter((input) => input.checked)
+    .map((input) => input.value);
+}
+
+function updateTripGoalsUi() {
+  const inputs = getTripGoalInputs();
+  if (!inputs.length) return;
+
+  const selected = getSelectedTripGoals();
+  const hasBalanced = selected.includes("balanced");
+  const nonBalanced = selected.filter((id) => id !== "balanced");
+  const atLimit = !hasBalanced && nonBalanced.length >= MAX_TRIP_GOALS;
+
+  inputs.forEach((input) => {
+    const isBalanced = input.value === "balanced";
+    if (hasBalanced) {
+      if (isBalanced) {
+        input.disabled = false;
+      } else {
+        input.checked = false;
+        input.disabled = true;
+      }
+      return;
+    }
+
+    if (isBalanced) {
+      input.disabled = nonBalanced.length > 0;
+      return;
+    }
+
+    input.disabled = !input.checked && atLimit;
+  });
+
+  if (tripGoalsHint) {
+    if (hasBalanced) {
+      tripGoalsHint.textContent = "Выбран сбалансированный маршрут";
+      tripGoalsHint.classList.remove("is-limit");
+    } else if (selected.length === 0) {
+      tripGoalsHint.textContent = "Выберите хотя бы одну цель";
+      tripGoalsHint.classList.remove("is-limit");
+    } else {
+      tripGoalsHint.textContent = `Выбрано целей: ${selected.length} из ${MAX_TRIP_GOALS}`;
+      tripGoalsHint.classList.toggle("is-limit", atLimit);
+    }
+  }
+}
+
+function initTripGoals() {
+  const inputs = getTripGoalInputs();
+  if (!inputs.length) return;
+
+  inputs.forEach((input) => {
+    input.addEventListener("change", () => {
+      if (input.value === "balanced" && input.checked) {
+        inputs.forEach((other) => {
+          if (other !== input) other.checked = false;
+        });
+      } else if (input.checked) {
+        const balanced = inputs.find((el) => el.value === "balanced");
+        if (balanced) balanced.checked = false;
+        const selected = getSelectedTripGoals().filter((id) => id !== "balanced");
+        if (selected.length > MAX_TRIP_GOALS) {
+          input.checked = false;
+        }
+      }
+      updateTripGoalsUi();
+    });
+  });
+
+  updateTripGoalsUi();
+}
+
+initTripGoals();
+
+function getMaxCityCount(days) {
+  const dayCount = Math.max(1, Number(days) || 1);
+  return Math.min(Math.max(2, dayCount), 10);
+}
+
+function syncCityCountLimits() {
+  if (!daysInput || !cityCountInput) return;
+  const maxCities = getMaxCityCount(daysInput.value);
+  cityCountInput.max = String(maxCities);
+  if (Number(cityCountInput.value) > maxCities) cityCountInput.value = String(maxCities);
+  if (Number(cityCountInput.value) < 2) cityCountInput.value = "2";
+}
+
+if (daysInput && cityCountInput) {
+  syncCityCountLimits();
+  daysInput.addEventListener("input", syncCityCountLimits);
+  daysInput.addEventListener("change", syncCityCountLimits);
+}
 
 function getApiBaseUrl() {
+  const host = window.location.hostname;
+  if (host === "localhost" || host === "127.0.0.1") {
+    return "";
+  }
   const configured = (window.TRAVEL_API_BASE || "").trim();
   if (configured) return configured.replace(/\/+$/, "");
   return "";
@@ -142,7 +252,9 @@ function renderPlan(plan) {
   lowBudgetBlock.classList.add("hidden");
   resultEl.classList.remove("hidden");
   routeTitle.textContent = plan.title || "Ваш маршрут";
-  routeSummary.textContent = plan.summary || "Маршрут успешно сформирован.";
+  const goalLabels = plan.preferences?.tripGoalLabels || [];
+  const goalsLine = goalLabels.length ? ` Цели: ${goalLabels.join(", ")}.` : "";
+  routeSummary.textContent = `${plan.summary || "Маршрут успешно сформирован."}${goalsLine}`;
 
   routePointsEl.innerHTML = "";
   const points = plan.routePoints || [];
@@ -230,6 +342,7 @@ function renderPlan(plan) {
 }
 
 function renderLowBudget(data) {
+  destroyRouteMap();
   resultEl.classList.remove("hidden");
   lowBudgetBlock.classList.remove("hidden");
   lowBudgetText.textContent = `${data.message} Минимально нужно: ${formatRub(
@@ -246,24 +359,64 @@ function renderLowBudget(data) {
   if (chartsEl) chartsEl.innerHTML = "";
 }
 
+function destroyRouteMap() {
+  if (routeMapInstance) {
+    routeMapInstance.remove();
+    routeMapInstance = null;
+  }
+}
+
 function renderMap(logistics) {
-  const points = logistics?.points || [];
+  destroyRouteMap();
+  const points = (logistics?.points || []).filter(
+    (p) => Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lon))
+  );
   if (!points.length) {
     mapWrapEl.innerHTML = '<div class="map-note">Карта будет показана после построения маршрута.</div>';
     return;
   }
 
-  const markerParam = points
-    .map((p) => `${p.lon},${p.lat},pm2rdm`)
-    .join("~");
-  const center = points[Math.floor(points.length / 2)];
-  const mapUrl = `https://static-maps.yandex.ru/1.x/?lang=ru_RU&ll=${center.lon},${center.lat}&z=4&l=map&size=600,300&pt=${encodeURIComponent(
-    markerParam
-  )}`;
-  mapWrapEl.innerHTML = `
-    <img src="${mapUrl}" alt="Карта маршрута" />
-    <div class="map-note">Карта: Yandex Static Maps. Маркеры по городам маршрута.</div>
-  `;
+  if (typeof window.L === "undefined") {
+    mapWrapEl.innerHTML =
+      '<div class="map-note">Не удалось загрузить модуль карты. Проверьте интернет и обновите страницу.</div>';
+    return;
+  }
+
+  mapWrapEl.innerHTML =
+    '<div id="routeMap" class="route-map"></div><div class="map-note">Карта маршрута. Маркеры — города поездки.</div>';
+
+  const latLngs = points.map((p) => [Number(p.lat), Number(p.lon)]);
+
+  requestAnimationFrame(() => {
+    const mapEl = document.getElementById("routeMap");
+    if (!mapEl) return;
+
+    routeMapInstance = window.L.map(mapEl, {
+      scrollWheelZoom: false,
+      attributionControl: true
+    });
+
+    window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(routeMapInstance);
+
+    latLngs.forEach((latLng, index) => {
+      const label = points[index]?.city || `Точка ${index + 1}`;
+      window.L.marker(latLng).addTo(routeMapInstance).bindPopup(label);
+    });
+
+    if (latLngs.length > 1) {
+      window.L.polyline(latLngs, {
+        color: "#3db0ff",
+        weight: 3,
+        opacity: 0.85
+      }).addTo(routeMapInstance);
+    }
+
+    routeMapInstance.fitBounds(window.L.latLngBounds(latLngs), { padding: [28, 28] });
+    setTimeout(() => routeMapInstance?.invalidateSize(), 0);
+  });
 }
 
 function renderLogistics(plan) {
@@ -295,13 +448,25 @@ form.addEventListener("submit", async (event) => {
   submitBtn.disabled = true;
   submitBtn.textContent = "Строим маршрут...";
 
+  syncCityCountLimits();
+  updateTripGoalsUi();
+  const tripGoals = getSelectedTripGoals();
+  if (!tripGoals.length) {
+    statusEl.textContent = "Выберите хотя бы одну цель поездки.";
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Построить маршрут";
+    return;
+  }
+
   const payload = {
     days: Number(document.getElementById("days").value),
     startCity: document.getElementById("startCity").value.trim(),
     endCity: document.getElementById("endCity").value.trim(),
+    cityCount: Number(document.getElementById("cityCount").value),
     budget: Number(document.getElementById("budget").value),
     needAccommodation: document.getElementById("needAccommodation").checked,
-    hasOwnCar: document.getElementById("hasOwnCar").checked
+    hasOwnCar: document.getElementById("hasOwnCar").checked,
+    tripGoals
   };
 
   try {
@@ -312,6 +477,8 @@ form.addEventListener("submit", async (event) => {
       days: payload.days,
       startCity: payload.startCity,
       endCity: payload.endCity,
+      cityCount: payload.cityCount,
+      tripGoals: payload.tripGoals,
       budget: payload.budget,
       needAccommodation: payload.needAccommodation,
       hasOwnCar: payload.hasOwnCar

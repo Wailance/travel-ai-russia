@@ -20,6 +20,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "express-rate-limit": "^8.5.0",
-    "helmet": "^8.1.0"
+    "helmet": "^8.1.0",
+    "leaflet": "^1.9.4"
   }
 }

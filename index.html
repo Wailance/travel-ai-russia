@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI-путешествия по России</title>
     <link rel="stylesheet" href="./public/styles.css" />
+    <link rel="stylesheet" href="./public/vendor/leaflet/leaflet.css" />
   </head>
   <body>
     <header class="hero">
@@ -32,6 +33,11 @@
               <input id="endCity" type="text" value="Санкт-Петербург" required />
             </label>
             <label>
+              Количество городов
+              <input id="cityCount" type="number" min="2" max="3" value="2" required />
+              <span class="field-hint">Включая старт и финиш. Не больше числа дней.</span>
+            </label>
+            <label>
               Бюджет (руб.)
               <input id="budget" type="number" min="1000" step="1000" value="50000" required />
             </label>
@@ -44,6 +50,28 @@
               Есть свое авто
             </label>
           </div>
+
+          <div class="goals-section">
+            <span class="goals-label">Цель поездки</span>
+            <span class="field-hint">Выберите до 3 целей. «Сбалансированный» — отдельно от остальных.</span>
+            <div id="tripGoals" class="goal-chips">
+              <label class="goal-chip"><input type="checkbox" name="tripGoal" value="balanced" checked /> Сбалансированный маршрут</label>
+              <label class="goal-chip"><input type="checkbox" name="tripGoal" value="landmarks" /> Достопримечательности</label>
+              <label class="goal-chip"><input type="checkbox" name="tripGoal" value="culture" /> Культурное просвещение</label>
+              <label class="goal-chip"><input type="checkbox" name="tripGoal" value="gastronomy" /> Гастрономия</label>
+              <label class="goal-chip"><input type="checkbox" name="tripGoal" value="orthodox" /> Православие</label>
+              <label class="goal-chip"><input type="checkbox" name="tripGoal" value="nature" /> Природа и отдых</label>
+              <label class="goal-chip"><input type="checkbox" name="tripGoal" value="family" /> С семьёй / детьми</label>
+              <label class="goal-chip"><input type="checkbox" name="tripGoal" value="romantic" /> Романтика / пара</label>
+              <label class="goal-chip"><input type="checkbox" name="tripGoal" value="active" /> Активный отдых</label>
+              <label class="goal-chip"><input type="checkbox" name="tripGoal" value="shopping" /> Шопинг и сувениры</label>
+              <label class="goal-chip"><input type="checkbox" name="tripGoal" value="photo" /> Фото и красивые виды</label>
+              <label class="goal-chip"><input type="checkbox" name="tripGoal" value="history" /> История и патриотика</label>
+              <label class="goal-chip"><input type="checkbox" name="tripGoal" value="nightlife" /> Ночная жизнь</label>
+            </div>
+            <p id="tripGoalsHint" class="goals-counter" aria-live="polite"></p>
+          </div>
+
           <button id="submitBtn" type="submit">Построить маршрут</button>
         </form>
         <p id="status" class="status"></p>
@@ -97,6 +125,7 @@
     </main>
     <footer id="contacts" class="footer">Travel AI Russia</footer>
 
+    <script src="./public/vendor/leaflet/leaflet.js"></script>
     <script src="./public/config.js"></script>
     <script src="./public/app.js"></script>
   </body>

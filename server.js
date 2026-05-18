@@ -21,7 +21,21 @@ app.set("trust proxy", 1);
 
 app.use(
   helmet({
-    crossOriginResourcePolicy: false
+    crossOriginResourcePolicy: false,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: [
+          "'self'",
+          "data:",
+          "https://*.tile.openstreetmap.org",
+          "https://static-maps.yandex.ru"
+        ],
+        connectSrc: ["'self'"]
+      }
+    }
   })
 );
 
@@ -31,6 +45,14 @@ app.use(
       if (!origin) return callback(null, true);
       if (origin === frontendOrigin || origin.startsWith("http://localhost:")) {
         return callback(null, true);
+      }
+      try {
+        const host = new URL(origin).hostname;
+        if (host.endsWith(".github.io") || host === "github.io") {
+          return callback(null, true);
+        }
+      } catch (_) {
+        // ignore invalid origin URL
       }
       return callback(new Error("CORS origin denied"));
     }
@@ -102,7 +124,272 @@ const CITY_IATA = {
   "суздаль": null
 };
 
-function buildPrompt({ days, startCity, endCity, budget, needAccommodation, hasOwnCar }) {
+const INTERMEDIATE_CITY_POOL = [
+  "Владимир",
+  "Суздаль",
+  "Ярославль",
+  "Ростов Великий",
+  "Сергиев Посад",
+  "Переславль-Залесский",
+  "Нижний Новгород",
+  "Тверь",
+  "Казань",
+  "Сочи"
+];
+
+function sanitizeCityCount(rawCityCount, days) {
+  const dayCount = Math.max(1, Number(days) || 1);
+  const maxCities = Math.min(Math.max(2, dayCount), 10);
+  let count = Number(rawCityCount);
+  if (!Number.isFinite(count)) count = 2;
+  count = Math.round(count);
+  if (count < 2) count = 2;
+  if (count > maxCities) count = maxCities;
+  return count;
+}
+
+function buildRoutePoints({ startCity, endCity, cityCount, days, seedPoints = [] }) {
+  const targetCount = sanitizeCityCount(cityCount, days);
+  const start = String(startCity || "").trim();
+  const end = String(endCity || "").trim();
+  if (targetCount <= 2) return [start, end];
+
+  const used = new Set([normalizeCityKey(start), normalizeCityKey(end)]);
+  const intermediates = [];
+
+  for (const city of seedPoints) {
+    if (intermediates.length >= targetCount - 2) break;
+    const key = normalizeCityKey(city);
+    if (!key || used.has(key)) continue;
+    used.add(key);
+    intermediates.push(String(city).trim());
+  }
+
+  for (const city of INTERMEDIATE_CITY_POOL) {
+    if (intermediates.length >= targetCount - 2) break;
+    const key = normalizeCityKey(city);
+    if (used.has(key)) continue;
+    used.add(key);
+    intermediates.push(city);
+  }
+
+  return [start, ...intermediates, end];
+}
+
+function distributeDayCounts(totalDays, citiesCount) {
+  const counts = Array(citiesCount).fill(1);
+  let remaining = Math.max(0, totalDays - citiesCount);
+  let idx = 0;
+  while (remaining > 0) {
+    counts[idx % citiesCount] += 1;
+    remaining -= 1;
+    idx += 1;
+  }
+  return counts;
+}
+
+function applyCityCountToPlan(plan, { startCity, endCity, cityCount, days }) {
+  const normalized = { ...plan };
+  const targetDays = Math.max(1, Number(days) || normalized.days?.length || 1);
+  const routePoints = buildRoutePoints({
+    startCity,
+    endCity,
+    cityCount,
+    days: targetDays,
+    seedPoints: normalized.routePoints || []
+  });
+  const dayCounts = distributeDayCounts(targetDays, routePoints.length);
+  const dayList = Array.isArray(normalized.days) ? [...normalized.days] : [];
+
+  let dayIndex = 0;
+  for (let cityIndex = 0; cityIndex < routePoints.length; cityIndex += 1) {
+    const city = routePoints[cityIndex];
+    for (let slot = 0; slot < dayCounts[cityIndex] && dayIndex < dayList.length; slot += 1) {
+      dayList[dayIndex] = {
+        ...dayList[dayIndex],
+        city
+      };
+      dayIndex += 1;
+    }
+  }
+
+  normalized.days = dayList;
+  normalized.routePoints = routePoints;
+  normalized.cityCount = routePoints.length;
+  return normalized;
+}
+
+const TRIP_GOALS = [
+  {
+    id: "balanced",
+    label: "Сбалансированный маршрут",
+    hint: "Смешанная программа без перекоса в одну тему: достопримечательности, культура, еда и отдых."
+  },
+  {
+    id: "landmarks",
+    label: "Достопримечательности",
+    hint: "Главные символы городов: площади, набережные, обзорные точки, знаковые ансамбли."
+  },
+  {
+    id: "culture",
+    label: "Культурное просвещение",
+    hint: "Музеи, выставки, театры, архитектурные маршруты, познавательные экскурсии."
+  },
+  {
+    id: "gastronomy",
+    label: "Гастрономия",
+    hint: "Конкретные рестораны, рынки, дегустации и региональная кухня."
+  },
+  {
+    id: "orthodox",
+    label: "Православие",
+    hint: "Соборы, монастыри и святыни; укажи правила посещения (одежда, тишина, расписание служб)."
+  },
+  {
+    id: "nature",
+    label: "Природа и отдых",
+    hint: "Парки, заповедники, набережные, спокойные прогулки на свежем воздухе."
+  },
+  {
+    id: "family",
+    label: "С семьёй / детьми",
+    hint: "Короткие переезды, интерактив и места, удобные для детей."
+  },
+  {
+    id: "romantic",
+    label: "Романтика / пара",
+    hint: "Атмосферные прогулки, виды, ужины и камерные локации."
+  },
+  {
+    id: "active",
+    label: "Активный отдых",
+    hint: "Пешие маршруты, велопрогулки, лёгкий треккинг без экстремальных нагрузок."
+  },
+  {
+    id: "shopping",
+    label: "Шопинг и сувениры",
+    hint: "Рынки, лавки, локальные бренды и сувенирные точки."
+  },
+  {
+    id: "photo",
+    label: "Фото и красивые виды",
+    hint: "Смотровые площадки, рассветы/закаты и живописные ракурсы."
+  },
+  {
+    id: "history",
+    label: "История и патриотика",
+    hint: "Мемориалы, музеи истории, места военной и государственной памяти."
+  },
+  {
+    id: "nightlife",
+    label: "Ночная жизнь",
+    hint: "Вечерние прогулки, бары, концерты; программа только для 18+."
+  }
+];
+
+const TRIP_GOALS_BY_ID = Object.fromEntries(TRIP_GOALS.map((goal) => [goal.id, goal]));
+
+function sanitizeTripGoals(rawGoals) {
+  const list = Array.isArray(rawGoals) ? rawGoals : [];
+  const unique = [];
+  for (const item of list) {
+    const id = String(item || "").trim();
+    if (!TRIP_GOALS_BY_ID[id] || unique.includes(id)) continue;
+    unique.push(id);
+  }
+
+  if (!unique.length || unique.includes("balanced")) {
+    return ["balanced"];
+  }
+
+  return unique.slice(0, 3);
+}
+
+function formatTripGoalsForPrompt(goalIds) {
+  return goalIds
+    .map((id) => TRIP_GOALS_BY_ID[id])
+    .filter(Boolean)
+    .map((goal) => `- ${goal.label}: ${goal.hint}`)
+    .join("\n");
+}
+
+const GIGACHAT_SYSTEM_PROMPT = `
+Ты планировщик маршрутов по России. Главное правило: не выдумывай.
+- Указывай только реально существующие города, музеи, рестораны и отели с точным названием.
+- Если не уверен в цене или названии — cost: null, priceStatus: "unknown".
+- Не придумывай «лучшие», «секретные» или «малоизвестные» места.
+- Не используй плейсхолдеры: «кафе», «музей», «ресторан», «активности» без конкретного имени.
+`.trim();
+
+const GENERIC_PLACE_PATTERNS = [
+  /^(место|локация|достопримечательност|экскурсия|музей|ресторан|кафе|парк|активност|прогулка|обед|ужин|завтрак|питание|проживание|отель|гостиница|транспорт|смотровая|площадь|набережная|центр города)/i,
+  /^(посещение|осмотр|знакомство|экскурсия по|обзор|свободное время)/i,
+  /^(активности и экскурсии|транспорт по маршруту)$/i,
+  /лучший|популярн|известн|необычн|уникальн|романтичн|уютн|красив|знаменит|секретн|малоизвестн|легендарн|топ-\d/i
+];
+
+function isGenericPlaceName(place) {
+  const p = String(place || "").trim();
+  if (p.length < 5) return true;
+  if (GENERIC_PLACE_PATTERNS.some((re) => re.test(p))) return true;
+  if (/^(кафе|ресторан|музей|парк|отель|площадь|собор|храм|театр|еда|питание|проживание)$/i.test(p)) {
+    return true;
+  }
+  return false;
+}
+
+function looksPossiblyHallucinated(place) {
+  return /(лучший|топ-|секретн|малоизвестн|легендарн|уникальн|незабываем|скрытый|must see|instagram)/i.test(
+    String(place || "")
+  );
+}
+
+function classifyItemType(item) {
+  const text = `${item?.place || ""} ${item?.comment || ""}`.toLowerCase();
+  if (/(отел|гостиниц|проживан|ночлег|апартамент)/.test(text)) return "hotel";
+  if (/(обед|ужин|завтрак|кафе|ресторан|еда|питани|фуд)/.test(text)) return "food";
+  if (/(переезд|трансфер|поезд|самолет|автобус|метро|такси|транспорт)/.test(text)) {
+    return "transport";
+  }
+  return "activity";
+}
+
+function isKnownVenue(place, city) {
+  const key = normalizeCityKey(city);
+  const rec = CITY_RECOMMENDATIONS[key];
+  if (!rec) return false;
+  const p = String(place || "").toLowerCase();
+  const all = [...(rec.food || []), ...(rec.hotel || []), ...(rec.activity || [])];
+  return all.some((name) => {
+    const n = name.toLowerCase();
+    return p.includes(n.slice(0, Math.min(14, n.length))) || n.includes(p.slice(0, Math.min(14, p.length)));
+  });
+}
+
+function formatVerifiedPoisForPrompt(routePoints) {
+  const lines = [];
+  for (const city of routePoints) {
+    const key = normalizeCityKey(city);
+    const rec = CITY_RECOMMENDATIONS[key];
+    if (!rec) continue;
+    const samples = [...(rec.activity || []).slice(0, 3), ...(rec.food || []).slice(0, 2)];
+    if (samples.length) lines.push(`- ${city}: ${samples.join("; ")}`);
+  }
+  return lines.length
+    ? lines.join("\n")
+    : "- Используй только общеизвестные объекты с точным официальным названием.";
+}
+
+function buildPrompt({ days, startCity, endCity, cityCount, budget, needAccommodation, hasOwnCar, tripGoals }) {
+  const goals = sanitizeTripGoals(tripGoals);
+  const goalsBlock = formatTripGoalsForPrompt(goals);
+  const suggestedRoute = buildRoutePoints({ startCity, endCity, cityCount, days });
+  const verifiedPois = formatVerifiedPoisForPrompt(suggestedRoute);
+  const allowedCities = Object.keys(DEFAULT_CITY_COORDS)
+    .map((k) => k.replace(/\b\w/g, (c) => c.toUpperCase()))
+    .slice(0, 12)
+    .join(", ");
+
   return `
 Ты — умный тревел-планировщик по России.
 Сформируй маршрут строго в формате JSON без markdown и без пояснений вне JSON.
@@ -111,9 +398,12 @@ function buildPrompt({ days, startCity, endCity, budget, needAccommodation, hasO
 - Длительность поездки: ${days} дней
 - Город старта: ${startCity}
 - Город окончания: ${endCity}
+- Количество посещаемых городов: ${cityCount} (включая старт и финиш)
 - Бюджет: ${budget} рублей
 - Нужно проживание: ${needAccommodation ? "да" : "нет"}
 - Есть свое авто: ${hasOwnCar ? "да" : "нет"}
+- Цели поездки (до 3, обязательно учесть в программе):
+${goalsBlock}
 
 Верни JSON следующей структуры:
 {
@@ -151,34 +441,92 @@ function buildPrompt({ days, startCity, endCity, budget, needAccommodation, hasO
 Важно:
 - total должен быть <= ${budget}
 - Количество days должно быть ровно ${days}
+- routePoints должен содержать ровно ${cityCount} уникальных городов России
+- Первый город в routePoints: ${startCity}, последний: ${endCity}
+- Рекомендуемая цепочка городов: ${suggestedRoute.join(" → ")}
+- В routePoints используй только города из этой цепочки или близкие реальные (Золотое кольцо, крупные города)
 - Маршрут должен быть реалистичен по логистике
-- Используй только города России
+- Используй только города России; ориентир: ${allowedCities}
 - Для еды указывай конкретные места (название заведения), не пиши общие слова вроде "кафе" или "ресторан" без названия
 - Для проживания (если нужно) указывай конкретный объект размещения (название отеля/апартаментов)
 - Если точная цена неизвестна, ставь cost: null и priceStatus: "unknown", не ставь 0 и не придумывай сумму
+- Никогда не ставь priceStatus: "verified", если цена не взята с официального сайта — модель всегда пишет "unknown"
+- Подбирай места и активности под все выбранные цели поездки; при нескольких целях чередуй акценты по дням
+
+Анти-галлюцинации (обязательно):
+- Не выдумывай названия музеев, ресторанов и отелей
+- Не придумывай цены и расписания
+- Примеры проверенных объектов по маршруту (можно использовать дословно):
+${verifiedPois}
+- Если не знаешь точное название — выбери общеизвестную достопримечательность города (Красная площадь, Эрмитаж, Казанский Кремль и т.п.)
 `.trim();
 }
 
 const CITY_RECOMMENDATIONS = {
   "москва": {
     food: ["Депо Москва (фудмолл)", "Вареничная №1 (Арбат)", "ДжонДжоли (Смоленская)"],
-    hotel: ["Azimut Сити Отель Смоленская", "Ibis Moscow Centre Bakhrushina", "Holiday Inn Moscow Sokolniki"]
+    hotel: ["Azimut Сити Отель Смоленская", "Ibis Moscow Centre Bakhrushina", "Holiday Inn Moscow Sokolniki"],
+    activity: ["Красная площадь", "Государственный исторический музей", "ВДНХ", "Парк Зарядье", "Третьяковская галерея"]
   },
   "санкт-петербург": {
     food: ["Marketplace (Невский проспект)", "Pkhali Khinkali (Садовая)", "Брынза (Невский)"],
-    hotel: ["AZIMUT Сити Отель Санкт-Петербург", "Ibis Saint Petersburg Centre", "Station Hotel M19"]
+    hotel: ["AZIMUT Сити Отель Санкт-Петербург", "Ibis Saint Petersburg Centre", "Station Hotel M19"],
+    activity: ["Эрмитаж", "Дворцовая площадь", "Исаакиевский собор", "Петропавловская крепость", "Невский проспект"]
   },
   "владимир": {
     food: ["Ресторан Обломов", "Кафе Гости", "Bulochnaya #1"],
-    hotel: ["AMAKS Золотое Кольцо", "Вознесенская Слобода", "Гостиница Владимир"]
+    hotel: ["AMAKS Золотое Кольцо", "Вознесенская Слобода", "Гостиница Владимир"],
+    activity: ["Золотые ворота", "Успенский собор", "Парк Победы", "Водонапорная башня (смотровая)"]
   },
   "ярославль": {
     food: ["Пенаты", "Собрание", "Кафе АндерСон"],
-    hotel: ["Ring Premier Hotel", "Ibis Yaroslavl Center", "Cosmos Yaroslavl Hotel"]
+    hotel: ["Ring Premier Hotel", "Ibis Yaroslavl Center", "Cosmos Yaroslavl Hotel"],
+    activity: ["Стрелка Волги и Которосли", "Успенский собор", "Спасо-Преображенский монастырь", "Волжская набережная"]
   },
   "сергиев посад": {
     food: ["Русский Дворик", "Гостевая Изба", "Келарская Набережная"],
-    hotel: ["Царская Деревня", "Посадский", "Барские Полати"]
+    hotel: ["Царская Деревня", "Посадский", "Барские Полати"],
+    activity: ["Троице-Сергиева лавра", "Конный двор", "Музей игрушки", "Пруд Красные баньки"]
+  },
+  "суздаль": {
+    food: ["Трапезная Троице-Сергиевой лавры (Суздаль)", "Гостиный двор", "Кафе Старый город"],
+    hotel: ["Суздаль", "Пушкарская слобода", "Отель Суздаль"],
+    activity: ["Кремль Суздаля", "Спасо-Евфимиев монастырь", "Музей деревянного зодчества", "Торговые ряды"]
+  },
+  "ростов великий": {
+    food: ["Русь", "Погост", "У Погоста"],
+    hotel: ["Сосновый бор", "Ростов", "Спасо-Яковлевский монастырь (гостиница)"],
+    activity: ["Ростовский кремль", "Спасо-Яковлевский монастырь", "Озеро Неро", "Музей финифти"]
+  },
+  "нижний новгород": {
+    food: ["Вареничная №1", "Безухов", "Волга"],
+    hotel: ["Azimut Отель Нижний Новгород", "Ibis Nizhny Novgorod", "Sheraton Nizhny Novgorod"],
+    activity: ["Нижегородский кремль", "Чкаловская лестница", "Стрелка Оки и Волги", "Большая Покровская улица"]
+  },
+  "казань": {
+    food: ["Тубэтей", "Дом татарской кулинарии", "Бульвар на Баумана"],
+    hotel: ["Korston Club Hotel", "Ibis Kazan", "Courtyard by Marriott Kazan"],
+    activity: ["Казанский Кремль", "Храм всех религий", "Улица Баумана", "Национальный музей Республики Татарстан"]
+  },
+  "екатеринбург": {
+    food: ["Паштет", "Папа Карло", "Колбасофф"],
+    hotel: ["Hyatt Regency Ekaterinburg", "Ibis Ekaterinburg Center", "Novotel Yekaterinburg"],
+    activity: ["Плотинка", "Храм на Крови", "Екатеринбургский музей изобразительных искусств", "Высоцкий смотровая"]
+  },
+  "сочи": {
+    food: ["Гагри", "Сан-Ремо", "Хинкальная на Навагинской"],
+    hotel: ["Radisson Collection Paradise", "Hyatt Regency Sochi", "Bridge Resort"],
+    activity: ["Сочинский национальный парк", "Олимпийский парк", "Дендрарий", "Красная Поляна (канатная дорога)"]
+  },
+  "новосибирск": {
+    food: ["Beerman & Grill", "Тюбетей", "Пепперони"],
+    hotel: ["Novotel Novosibirsk", "DoubleTree by Hilton", "Azimut Отель Новосибирск"],
+    activity: ["Новосибирский государственный художественный музей", "Театр оперы и балета", "Метромост", "Зоопарк"]
+  },
+  "переславль-залесский": {
+    food: ["Хлебник", "Трапезная", "Русский дворик"],
+    hotel: ["Русь", "Переславль", "Хостел на Красной площади"],
+    activity: ["Красная площадь", "Спасо-Преображенский собор", "Музей утюга", "Плещеево озеро"]
   }
 };
 
@@ -186,8 +534,74 @@ function pickSpecific(city, type, index) {
   const key = (city || "").trim().toLowerCase();
   const list = CITY_RECOMMENDATIONS[key]?.[type];
   if (list && list.length) return list[index % list.length];
-  if (type === "food") return "Теремок (центр города)";
-  return "Отель Центральный";
+  const defaults = {
+    food: "Теремок (центр города)",
+    hotel: "Отель в центре — уточните на booking.com",
+    activity: "Исторический центр и главная площадь",
+    transport: "Локальный транспорт по маршруту"
+  };
+  return defaults[type] || defaults.activity;
+}
+
+async function groundPlanPlaces(plan, { maxGeocodes = 10 } = {}) {
+  if (!plan || !Array.isArray(plan.days)) {
+    return { plan, stats: { replaced: 0, geocodeChecks: 0 } };
+  }
+
+  const cache = new Map();
+  let geocodeChecks = 0;
+  let replaced = 0;
+
+  for (let dayIndex = 0; dayIndex < plan.days.length; dayIndex += 1) {
+    const day = plan.days[dayIndex];
+    if (!Array.isArray(day.items)) continue;
+    const city = day.city || "";
+
+    for (let itemIndex = 0; itemIndex < day.items.length; itemIndex += 1) {
+      const item = day.items[itemIndex];
+      const place = String(item.place || "").trim();
+      const type = classifyItemType(item);
+
+      item.priceStatus = "unknown";
+      if (Number(item.cost) > 0) {
+        item.cost = null;
+        if (!item.priceNote) {
+          item.priceNote = "Цена не подтверждена — проверьте на официальном сайте.";
+        }
+      }
+
+      if (isGenericPlaceName(place)) {
+        item.place = pickSpecific(city, type, dayIndex + itemIndex);
+        item.cost = null;
+        item.priceStatus = "unknown";
+        item.priceNote = "Подобрано из проверенного списка; цену уточните на месте.";
+        item.grounded = true;
+        replaced += 1;
+        continue;
+      }
+
+      const shouldGeocode =
+        geocodeChecks < maxGeocodes &&
+        !isKnownVenue(place, city) &&
+        (looksPossiblyHallucinated(place) || place.length >= 12);
+
+      if (!shouldGeocode) continue;
+
+      geocodeChecks += 1;
+      const poi = await geocodePlace(place, city, cache);
+      if (!poi) {
+        const previous = place;
+        item.place = pickSpecific(city, type, dayIndex + itemIndex);
+        item.comment = `${item.comment || ""} Заменено: «${previous}» не найдено на карте.`.trim();
+        item.cost = null;
+        item.priceStatus = "unknown";
+        item.grounded = true;
+        replaced += 1;
+      }
+    }
+  }
+
+  return { plan, stats: { replaced, geocodeChecks } };
 }
 
 async function geocodeCity(city, cache) {
@@ -638,7 +1052,7 @@ function normalizePlan(plan, budgetLimit, daysLimit, needAccommodation) {
     if (!hasActivities) {
       dayItems.push({
         time: "11:00",
-        place: "Активности и экскурсии",
+        place: pickSpecific(day.city, "activity", index),
         cost: null,
         comment: "Основные посещения и впечатления дня.",
         priceStatus: "unknown",
@@ -667,14 +1081,23 @@ function normalizePlan(plan, budgetLimit, daysLimit, needAccommodation) {
     }
 
     for (const item of dayItems) {
-      const place = String(item.place || "");
+      let place = String(item.place || "");
       const rawCost = Number(item.cost);
       item.cost = Number.isFinite(rawCost) && rawCost > 0 ? Math.round(rawCost) : null;
+      if (isGenericPlaceName(place)) {
+        const type = classifyItemType(item);
+        item.place = pickSpecific(day.city, type, index);
+        place = item.place;
+        item.cost = null;
+        item.priceStatus = "unknown";
+        item.priceNote = "Подобрано из проверенного списка; цену уточните на месте.";
+      }
       if (!item.cost) {
         item.priceStatus = "unknown";
         if (!item.priceNote) item.priceNote = "Цена не подтверждена, требуется проверка.";
       } else {
-        item.priceStatus = item.priceStatus === "verified" ? "verified" : "unknown";
+        item.priceStatus = "unknown";
+        item.priceNote = "Цена не подтверждена — проверьте на официальном сайте.";
       }
       if (/^питание$/i.test(place) || /^еда$/i.test(place)) {
         item.place = pickSpecific(day.city, "food", index);
@@ -869,17 +1292,21 @@ function rebalanceBudgetByPreferences(plan, params) {
   return normalized;
 }
 
-function estimateMinimumBudget({ days, startCity, endCity, needAccommodation, hasOwnCar }) {
+function estimateMinimumBudget({ days, startCity, endCity, cityCount, needAccommodation, hasOwnCar }) {
   const dayCount = Math.max(1, Number(days) || 1);
+  const citiesCount = sanitizeCityCount(cityCount, dayCount);
+  const segments = Math.max(1, citiesCount - 1);
   const withAccommodation = needAccommodation !== false;
   const from = DEFAULT_CITY_COORDS[(startCity || "").trim().toLowerCase()];
   const to = DEFAULT_CITY_COORDS[(endCity || "").trim().toLowerCase()];
   const intercityKm = from && to ? haversineKm(from, to) : 700;
-  const intercityMode = pickIntercityMode(intercityKm);
+  const segmentKm = intercityKm / segments;
+  const intercityMode = pickIntercityMode(segmentKm);
   const ownCar = hasOwnCar === true;
-  const transportIntercity = ownCar
-    ? Math.max(900, Math.round(intercityKm * 6.5))
-    : estimateTransportCost(intercityKm, intercityMode);
+  const perSegment = ownCar
+    ? Math.max(900, Math.round(segmentKm * 6.5))
+    : estimateTransportCost(segmentKm, intercityMode);
+  const transportIntercity = perSegment * segments;
   const transportLocal = dayCount * (ownCar ? 220 : 450);
   const transport = transportIntercity + transportLocal;
   const hotel = withAccommodation ? dayCount * 2200 : 0;
@@ -891,6 +1318,8 @@ function estimateMinimumBudget({ days, startCity, endCity, needAccommodation, ha
     "Estimated minimum budget",
     {
       dayCount,
+      citiesCount,
+      segments,
       startCity,
       endCity,
       withAccommodation,
@@ -902,7 +1331,7 @@ function estimateMinimumBudget({ days, startCity, endCity, needAccommodation, ha
   return minimumBudget;
 }
 
-async function requestGigaChat(prompt) {
+async function requestGigaChat(prompt, { temperature = 0.25 } = {}) {
   const token = await getGigaChatAccessToken();
   const model = process.env.GIGACHAT_MODEL || "GigaChat";
   const endpoint =
@@ -919,8 +1348,11 @@ async function requestGigaChat(prompt) {
       },
       body: JSON.stringify({
         model,
-        temperature: 0.6,
-        messages: [{ role: "user", content: prompt }]
+        temperature,
+        messages: [
+          { role: "system", content: GIGACHAT_SYSTEM_PROMPT },
+          { role: "user", content: prompt }
+        ]
       })
     });
 
@@ -945,31 +1377,67 @@ async function repairJsonWithModel(rawText) {
 
 ${rawText}
 `.trim();
-  return requestGigaChat(repairPrompt);
+  return requestGigaChat(repairPrompt, { temperature: 0.1 });
 }
 
-function createFallbackPlan({ days, startCity, endCity, budget }) {
+function createFallbackPlan({ days, startCity, endCity, budget, cityCount, tripGoals }) {
+  const goals = sanitizeTripGoals(tripGoals);
+  const goalLabels = goals.map((id) => TRIP_GOALS_BY_ID[id]?.label).filter(Boolean);
   const count = Math.max(1, Number(days) || 1);
-  const dayList = Array.from({ length: count }, (_, idx) => {
-    const day = idx + 1;
-    const city = day === 1 ? startCity : day === count ? endCity : startCity;
-    return {
-      day,
-      city,
-      dateLabel: `День ${day}`,
-      items: [
-        { time: "09:00", place: "Транспорт по маршруту", cost: 0, comment: "Переезд между точками маршрута." },
-        { time: "11:00", place: "Активности и экскурсии", cost: 0, comment: "Основная программа дня." },
-        { time: "14:00", place: "Питание", cost: 0, comment: "Питание в течение дня." },
-        { time: "20:00", place: "Проживание", cost: 0, comment: "Размещение на ночь." }
-      ]
-    };
+  const routePoints = buildRoutePoints({ startCity, endCity, cityCount, days: count });
+  const dayCounts = distributeDayCounts(count, routePoints.length);
+  const dayList = [];
+  let dayNumber = 0;
+
+  routePoints.forEach((city, cityIndex) => {
+    for (let slot = 0; slot < dayCounts[cityIndex]; slot += 1) {
+      dayNumber += 1;
+      dayList.push({
+        day: dayNumber,
+        city,
+        dateLabel: `День ${dayNumber}`,
+        items: [
+          {
+            time: "09:00",
+            place: pickSpecific(city, "transport", dayNumber),
+            cost: null,
+            comment: "Переезд между точками маршрута.",
+            priceStatus: "unknown"
+          },
+          {
+            time: "11:00",
+            place: pickSpecific(city, "activity", dayNumber),
+            cost: null,
+            comment: "Основная программа дня.",
+            priceStatus: "unknown"
+          },
+          {
+            time: "14:00",
+            place: pickSpecific(city, "food", dayNumber),
+            cost: null,
+            comment: "Питание в течение дня.",
+            priceStatus: "unknown"
+          },
+          {
+            time: "20:00",
+            place: pickSpecific(city, "hotel", dayNumber),
+            cost: null,
+            comment: "Размещение на ночь.",
+            priceStatus: "unknown"
+          }
+        ]
+      });
+    }
   });
 
+  const cityLabel =
+    routePoints.length > 2
+      ? `${routePoints.length} города`
+      : `${startCity} — ${endCity}`;
+
   return {
-    title: `Маршрут ${startCity} — ${endCity}`,
-    summary:
-      "Готов базовый маршрут на выбранный срок и бюджет: порядок дней, переезды, питание, активности и проживание.",
+    title: `Маршрут ${cityLabel}`,
+    summary: `Готов базовый маршрут на выбранный срок и бюджет. Акцент: ${goalLabels.join(", ")}.`,
     budgetPlan: {
       transport: Math.round(Number(budget) * 0.35),
       hotel: Math.round(Number(budget) * 0.3),
@@ -979,23 +1447,51 @@ function createFallbackPlan({ days, startCity, endCity, budget }) {
       total: Number(budget)
     },
     days: dayList,
-    routePoints: [startCity, endCity],
+    routePoints,
+    cityCount: routePoints.length,
     tips: ["Проверьте точки маршрута и пересоберите план при необходимости."]
   };
 }
 
+function formatGigaChatAuthError(status, details) {
+  let code = null;
+  try {
+    const parsed = JSON.parse(details);
+    code = parsed?.code;
+  } catch (_) {
+    // keep raw details
+  }
+
+  if (status === 401 && code === 6) {
+    return [
+      "Неверный ключ авторизации GigaChat (OAuth 401, code 6).",
+      "Что сделать:",
+      "1) Откройте https://developers.sber.ru/studio — проект GigaChat API.",
+      "2) Создайте новый «Ключ авторизации» (Authorization key), не путайте с access token.",
+      "3) Вставьте его в .env в GIGACHAT_AUTH_KEY=... (одной строкой, без кавычек).",
+      "4) Проверьте GIGACHAT_SCOPE: для физлиц — GIGACHAT_API_PERS, для B2B — GIGACHAT_API_B2B.",
+      "5) Перезапустите сервер (npm start).",
+      "Либо включите GIGACHAT_DEMO_MODE=true для проверки без API."
+    ].join(" ");
+  }
+
+  return `Ошибка OAuth GigaChat (${status}): ${details}`;
+}
+
 async function getGigaChatAccessToken() {
-  const accessToken = process.env.GIGACHAT_TOKEN;
-  const authKey = process.env.GIGACHAT_AUTH_KEY;
+  const accessToken = (process.env.GIGACHAT_TOKEN || "").trim();
+  const authKey = (process.env.GIGACHAT_AUTH_KEY || "").trim();
   const useOauth = process.env.GIGACHAT_USE_OAUTH === "true";
 
-  if (accessToken && !authKey && !useOauth) {
+  if (!useOauth && accessToken) {
     return accessToken;
   }
 
   const credentials = authKey || accessToken;
   if (!credentials) {
-    throw new Error("Укажите GIGACHAT_AUTH_KEY или GIGACHAT_TOKEN в .env");
+    throw new Error(
+      "Укажите GIGACHAT_AUTH_KEY (ключ авторизации) или GIGACHAT_TOKEN в .env. Инструкция: LOCAL_SETUP_RU.md"
+    );
   }
 
   const oauthUrl =
@@ -1016,7 +1512,7 @@ async function getGigaChatAccessToken() {
 
   if (!response.ok) {
     const details = await response.text();
-    throw new Error(`Ошибка OAuth GigaChat (${response.status}): ${details}`);
+    throw new Error(formatGigaChatAuthError(response.status, details));
   }
 
   const payload = await response.json();
@@ -1026,12 +1522,29 @@ async function getGigaChatAccessToken() {
   return payload.access_token;
 }
 
+app.get("/api/trip-goals", (req, res) => {
+  res.json({ goals: TRIP_GOALS });
+});
+
 app.post("/api/plan", async (req, res) => {
-  const { days, startCity, endCity, budget, needAccommodation, hasOwnCar } = req.body || {};
+  const {
+    days,
+    startCity,
+    endCity,
+    budget,
+    needAccommodation,
+    hasOwnCar,
+    cityCount: rawCityCount,
+    tripGoals: rawTripGoals
+  } = req.body || {};
+  const cityCount = sanitizeCityCount(rawCityCount, days);
+  const tripGoals = sanitizeTripGoals(rawTripGoals);
   debugLog("server.js:/api/plan:start", "Incoming /api/plan request", {
     days,
     startCity,
     endCity,
+    cityCount,
+    tripGoals,
     budget,
     needAccommodation,
     hasOwnCar
@@ -1048,9 +1561,52 @@ app.post("/api/plan", async (req, res) => {
       days,
       startCity,
       endCity,
+      cityCount,
       needAccommodation,
       hasOwnCar
     });
+    const buildPlanResponse = async (parsed, generatedWith) => {
+      const hasAccommodation = needAccommodation !== false;
+      const { plan: grounded, stats } = await groundPlanPlaces(parsed);
+      let normalized = normalizePlan(grounded, budget, days, hasAccommodation);
+      normalized.grounding = stats;
+      if (stats.replaced > 0) {
+        const tips = Array.isArray(normalized.tips) ? normalized.tips : [];
+        normalized.tips = [
+          ...tips,
+          "Часть мест заменена на проверенные — сверьте адреса и часы работы перед выездом."
+        ];
+      }
+      normalized = applyCityCountToPlan(normalized, { startCity, endCity, cityCount, days });
+      const routePoints = (normalized.routePoints || []).filter(Boolean);
+      const logistics = await buildLogistics(routePoints, { hasOwnCar });
+      normalized.logistics = logistics;
+      normalized = rebalanceBudgetByPreferences(normalized, {
+        days,
+        budget,
+        needAccommodation: hasAccommodation,
+        hasOwnCar
+      });
+      normalized = await enrichPlanWithDayMaps(normalized);
+      normalized.preferences = {
+        needAccommodation: hasAccommodation,
+        hasOwnCar: Boolean(hasOwnCar),
+        cityCount,
+        tripGoals,
+        tripGoalLabels: tripGoals.map((id) => TRIP_GOALS_BY_ID[id]?.label).filter(Boolean)
+      };
+      normalized.generatedWith = generatedWith;
+      return normalized;
+    };
+
+    if (process.env.GIGACHAT_DEMO_MODE === "true") {
+      const demoPlan = await buildPlanResponse(
+        createFallbackPlan({ days, startCity, endCity, budget, cityCount, tripGoals }),
+        "demo"
+      );
+      return res.json(demoPlan);
+    }
+
     if (Number(budget) < minimumBudget) {
       debugLog("server.js:/api/plan:low-budget", "Early low-budget stop", {
         budget: Number(budget),
@@ -1069,9 +1625,11 @@ app.post("/api/plan", async (req, res) => {
       days,
       startCity,
       endCity,
+      cityCount,
       budget,
       needAccommodation,
-      hasOwnCar
+      hasOwnCar,
+      tripGoals
     });
     let parsed = null;
     let modelText = "";
@@ -1080,7 +1638,11 @@ app.post("/api/plan", async (req, res) => {
       const extraStrict =
         i === 0
           ? ""
-          : "\nПовторная попытка: верни только валидный JSON, без комментариев и без ```.";
+          : `
+Повторная попытка: верни только валидный JSON, без комментариев и без \`\`\`.
+Не выдумывай названия заведений. Используй только общеизвестные объекты или примеры из промпта.
+Все cost при сомнении — null, priceStatus — "unknown".
+`;
       modelText = await requestGigaChat(`${prompt}${extraStrict}`);
       parsed = parseModelJson(modelText);
       if (parsed) break;
@@ -1090,26 +1652,11 @@ app.post("/api/plan", async (req, res) => {
       const repairedText = await repairJsonWithModel(modelText);
       parsed = parseModelJson(repairedText);
       if (!parsed) {
-        parsed = createFallbackPlan({ days, startCity, endCity, budget });
+        parsed = createFallbackPlan({ days, startCity, endCity, budget, cityCount, tripGoals });
       }
     }
 
-    const hasAccommodation = needAccommodation !== false;
-    let normalized = normalizePlan(parsed, budget, days, hasAccommodation);
-    const routePoints = (normalized.routePoints || []).filter(Boolean);
-    const logistics = await buildLogistics(routePoints, { hasOwnCar });
-    normalized.logistics = logistics;
-    normalized = rebalanceBudgetByPreferences(normalized, {
-      days,
-      budget,
-      needAccommodation: hasAccommodation,
-      hasOwnCar
-    });
-    normalized = await enrichPlanWithDayMaps(normalized);
-    normalized.preferences = {
-      needAccommodation: hasAccommodation,
-      hasOwnCar: Boolean(hasOwnCar)
-    };
+    const normalized = await buildPlanResponse(parsed, "ai");
     debugLog("server.js:/api/plan:success", "Plan response generated", {
       generatedWith: normalized.generatedWith || "ai",
       daysCount: Array.isArray(normalized.days) ? normalized.days.length : 0,
@@ -1121,10 +1668,22 @@ app.post("/api/plan", async (req, res) => {
     // Production-safe fallback: if provider is unreachable, return deterministic plan
     // instead of hard failing the user flow.
     if (/fetch failed|network|ECONN|ENOTFOUND|ETIMEDOUT/i.test(message)) {
-      const { days, startCity, endCity, budget, needAccommodation, hasOwnCar } = req.body || {};
+      const {
+        days,
+        startCity,
+        endCity,
+        budget,
+        needAccommodation,
+        hasOwnCar,
+        cityCount: rawCityCount,
+        tripGoals: rawTripGoals
+      } = req.body || {};
+      const cityCount = sanitizeCityCount(rawCityCount, days);
+      const tripGoals = sanitizeTripGoals(rawTripGoals);
       const hasAccommodation = needAccommodation !== false;
-      let fallback = createFallbackPlan({ days, startCity, endCity, budget });
+      let fallback = createFallbackPlan({ days, startCity, endCity, budget, cityCount, tripGoals });
       fallback = normalizePlan(fallback, budget, days, hasAccommodation);
+      fallback = applyCityCountToPlan(fallback, { startCity, endCity, cityCount, days });
       const routePoints = (fallback.routePoints || []).filter(Boolean);
       const logistics = await buildLogistics(routePoints, { hasOwnCar });
       fallback.logistics = logistics;
