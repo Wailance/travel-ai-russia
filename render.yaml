@@ -3,7 +3,7 @@ services:
     name: travel-ai-russia-api
     runtime: node
     plan: free
-    branch: split-frontend-backend
+    branch: main
     rootDir: .
     buildCommand: npm install
     startCommand: npm start
@@ -16,7 +16,7 @@ services:
       - key: GIGACHAT_USE_OAUTH
         value: "true"
       - key: GIGACHAT_INSECURE_TLS
-        value: "false"
+        value: "true"
       - key: FRONTEND_ORIGIN
         value: "https://wailance.github.io"
       - key: GIGACHAT_MODEL

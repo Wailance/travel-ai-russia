@@ -1,0 +1,44 @@
+name: Sync Render environment
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, split-frontend-backend]
+    paths:
+      - ".github/workflows/sync-render-env.yml"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync GigaChat secrets to Render
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          GIGACHAT_AUTH_KEY: ${{ secrets.GIGACHAT_AUTH_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RENDER_API_KEY:-}" ] || [ -z "${RENDER_SERVICE_ID:-}" ]; then
+            echo "RENDER_API_KEY or RENDER_SERVICE_ID not configured — skip."
+            exit 0
+          fi
+          payload=$(python3 - <<'PY'
+          import json, os
+          items = [
+            {"key": "GIGACHAT_AUTH_KEY", "value": os.environ["GIGACHAT_AUTH_KEY"]},
+            {"key": "GIGACHAT_USE_OAUTH", "value": "true"},
+            {"key": "GIGACHAT_INSECURE_TLS", "value": "true"},
+            {"key": "GIGACHAT_DEMO_MODE", "value": "false"},
+            {"key": "GIGACHAT_SCOPE", "value": "GIGACHAT_API_PERS"},
+            {"key": "GIGACHAT_TOKEN", "value": ""},
+            {"key": "FRONTEND_ORIGIN", "value": "https://wailance.github.io"},
+          ]
+          print(json.dumps(items))
+          PY
+          )
+          curl -fsS --http1.1 -X PUT \
+            "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/env-vars" \
+            -H "Authorization: Bearer ${RENDER_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            -d "${payload}"
