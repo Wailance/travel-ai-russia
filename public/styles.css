@@ -204,17 +204,19 @@ label {
 
 }
 
-.goals-section.is-collapsed .goals-section.is-collapsed .goal-chips {
+.goal-chips {
 
-  display: flex;
+  display: grid;
 
-  flex-wrap: wrap;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 
   gap: 8px;
 
 }
 
 .goal-chip {
+
+  display: flex;
 
   flex-direction: row;
 
@@ -939,6 +941,12 @@ li {
 @media (max-width: 720px) {
 
   .grid {
+
+    grid-template-columns: 1fr;
+
+  }
+
+  .goal-chips {
 
     grid-template-columns: 1fr;
 
