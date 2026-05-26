@@ -657,6 +657,30 @@ button:disabled {
   min-width: 0;
 }
 
+.badge-verified {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(45, 140, 80, 0.25);
+  color: #7dda9a;
+  border: 1px solid rgba(80, 180, 110, 0.35);
+  vertical-align: middle;
+  margin-left: 6px;
+}
+
+.badge-unverified {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(180, 130, 40, 0.2);
+  color: #e0b860;
+  border: 1px solid rgba(200, 160, 60, 0.3);
+  vertical-align: middle;
+  margin-left: 6px;
+}
+
 .price-note {
 
   color: #91a5c8;

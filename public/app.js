@@ -307,12 +307,15 @@ function renderPlan(plan) {
       const photoHtml = item.imageUrl
         ? `<div class="item-photo-wrap"><img class="item-photo" src="${item.imageUrl}" alt="${item.place || ""}" loading="lazy" /></div>`
         : "";
+      const verifiedBadge = item.verified
+        ? '<span class="badge-verified" title="Место проверено">&#10003; проверено</span>'
+        : '<span class="badge-unverified" title="Рекомендуем проверить актуальность">&#9888; проверьте</span>';
       row.innerHTML = `
         <div class="item-time">${item.time || ""}</div>
         <div class="item-details">
           ${photoHtml}
           <div class="item-text">
-            <strong>${item.place || ""}</strong><br>${item.comment || ""}${
+            <strong>${item.place || ""}</strong> ${verifiedBadge}<br>${item.comment || ""}${
               item.priceNote ? `<br><span class="price-note">${item.priceNote}</span>` : ""
             }
           </div>
