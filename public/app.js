@@ -1,3 +1,47 @@
+let loadingInterval = null;
+let loadingStart = 0;
+
+function startLoadingBar() {
+  const bar = document.getElementById("loadingBar");
+  const fill = document.getElementById("loadingBarFill");
+  const text = document.getElementById("loadingBarText");
+  if (!bar || !fill || !text) return;
+  bar.classList.add("active");
+  fill.style.width = "0%";
+  loadingStart = Date.now();
+  const messages = [
+    "Подбираем города и маршрут...",
+    "Генерируем расписание...",
+    "Рассчитываем логистику...",
+    "Подбираем фотографии...",
+    "Балансируем бюджет...",
+    "Финальные штрихи..."
+  ];
+  let step = 0;
+  text.textContent = messages[0];
+  loadingInterval = setInterval(() => {
+    const elapsed = (Date.now() - loadingStart) / 1000;
+    const progress = Math.min(92, elapsed * 2.8);
+    fill.style.width = `${progress}%`;
+    const newStep = Math.min(Math.floor(elapsed / 5), messages.length - 1);
+    if (newStep !== step) {
+      step = newStep;
+      text.textContent = messages[step];
+    }
+  }, 300);
+}
+
+function stopLoadingBar() {
+  clearInterval(loadingInterval);
+  const bar = document.getElementById("loadingBar");
+  const fill = document.getElementById("loadingBarFill");
+  if (fill) fill.style.width = "100%";
+  setTimeout(() => {
+    if (bar) bar.classList.remove("active");
+    if (fill) fill.style.width = "0%";
+  }, 400);
+}
+
 const form = document.getElementById("plannerForm");
 const statusEl = document.getElementById("status");
 const submitBtn = document.getElementById("submitBtn");
@@ -456,8 +500,10 @@ function renderLogistics(plan) {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   statusEl.textContent = "";
+  statusEl.classList.remove("error");
   submitBtn.disabled = true;
   submitBtn.textContent = "Строим маршрут...";
+  startLoadingBar();
 
   syncCityCountLimits();
   updateTripGoalsUi();
@@ -534,9 +580,16 @@ form.addEventListener("submit", async (event) => {
     renderPlan(data);
     renderLogistics(data);
     statusEl.textContent = "Маршрут готов.";
+    const resultNav = document.getElementById("resultNav");
+    if (resultNav) resultNav.classList.remove("hidden");
+    setTimeout(() => {
+      document.getElementById("result")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 150);
   } catch (error) {
     statusEl.textContent = error.message || "Не удалось построить маршрут.";
+    statusEl.classList.add("error");
   } finally {
+    stopLoadingBar();
     submitBtn.disabled = false;
     submitBtn.textContent = "Построить маршрут";
   }

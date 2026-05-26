@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="ru" style="scroll-behavior: smooth;">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -13,6 +13,7 @@
         <h1>РОССИЯ</h1>
         <p>AI-маршрут под ваш срок и бюджет</p>
       </div>
+      <a href="#plannerForm" class="hero-scroll-hint" aria-label="К форме">&#8595;</a>
     </header>
 
     <main class="container">
@@ -74,10 +75,23 @@
 
           <button id="submitBtn" type="submit">Построить маршрут</button>
         </form>
+        <div id="loadingBar" class="loading-bar">
+          <div class="loading-bar-track"><div id="loadingBarFill" class="loading-bar-fill"></div></div>
+          <div id="loadingBarText" class="loading-bar-text"></div>
+        </div>
         <p id="status" class="status"></p>
       </section>
 
       <section id="result" class="result hidden">
+        <nav id="resultNav" class="result-nav hidden">
+          <a href="#path">&#128205; Путь</a>
+          <a href="#route">&#128197; Расписание</a>
+          <a href="#logistics-section">&#128666; Логистика</a>
+          <a href="#budget-section">&#128176; Бюджет</a>
+          <a href="#charts-section">&#128200; Графики</a>
+          <a href="#tips-section">&#128161; Советы</a>
+        </nav>
+
         <article id="lowBudgetBlock" class="card hidden">
           <h3>Маршрут не построен</h3>
           <p id="lowBudgetText"></p>
@@ -89,7 +103,7 @@
         </article>
 
         <article class="card" id="path">
-          <h3>Наш путь</h3>
+          <h3><span class="section-icon">&#128205;</span>Наш путь</h3>
           <div class="path-layout">
             <div id="routePoints" class="route-points"></div>
             <div id="mapWrap" class="map-wrap"></div>
@@ -97,28 +111,28 @@
         </article>
 
         <article class="card" id="route">
-          <h3>Расписание тура</h3>
+          <h3><span class="section-icon">&#128197;</span>Расписание тура</h3>
           <div id="schedule" class="schedule"></div>
         </article>
 
-        <article class="card">
-          <h3>Логистика (реальные расстояния/время)</h3>
+        <article class="card" id="logistics-section">
+          <h3><span class="section-icon">&#128666;</span>Логистика</h3>
           <div id="logistics" class="logistics"></div>
         </article>
 
-        <article class="card">
-          <h3>Бюджет</h3>
+        <article class="card" id="budget-section">
+          <h3><span class="section-icon">&#128176;</span>Бюджет</h3>
           <p id="budgetReality" class="budget-reality"></p>
           <div id="budgetPlan" class="budget"></div>
         </article>
 
-        <article class="card">
-          <h3>Графики</h3>
+        <article class="card" id="charts-section">
+          <h3><span class="section-icon">&#128200;</span>Графики</h3>
           <div id="charts" class="charts"></div>
         </article>
 
-        <article class="card">
-          <h3>Советы</h3>
+        <article class="card" id="tips-section">
+          <h3><span class="section-icon">&#128161;</span>Советы</h3>
           <ul id="tips"></ul>
         </article>
       </section>
