@@ -1884,6 +1884,7 @@ app.get("/api/health", (req, res) => {
 app.get("/api/diag", (req, res) => {
   res.json({
     ok: true,
+    version: "2.1.0-photos-verify",
     oauthMode: process.env.GIGACHAT_USE_OAUTH === "true",
     insecureTls: process.env.GIGACHAT_INSECURE_TLS === "true",
     hasToken: Boolean(process.env.GIGACHAT_TOKEN),
