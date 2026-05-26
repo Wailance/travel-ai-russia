@@ -31,7 +31,8 @@ app.use(
           "'self'",
           "data:",
           "https://*.tile.openstreetmap.org",
-          "https://static-maps.yandex.ru"
+          "https://static-maps.yandex.ru",
+          "https://upload.wikimedia.org"
         ],
         connectSrc: ["'self'"]
       }
@@ -914,6 +915,77 @@ async function buildLogistics(routePoints, options = {}) {
   return { points, segments };
 }
 
+async function fetchPlaceImage(placeName, city, cache) {
+  const cacheKey = `${placeName}||${city}`.toLowerCase();
+  if (cache.has(cacheKey)) return cache.get(cacheKey);
+
+  const queries = [
+    placeName,
+    `${placeName} ${city}`,
+    `${placeName} Россия`
+  ];
+
+  for (const query of queries) {
+    try {
+      const url =
+        `https://ru.wikipedia.org/w/api.php?action=query` +
+        `&titles=${encodeURIComponent(query)}` +
+        `&prop=pageimages&format=json&pithumbsize=480&redirects=1`;
+      const response = await fetch(url, {
+        headers: { "User-Agent": "travel-ai-russia/1.0" }
+      });
+      if (!response.ok) continue;
+      const data = await response.json();
+      const pages = data?.query?.pages;
+      if (!pages) continue;
+      const page = Object.values(pages)[0];
+      const thumb = page?.thumbnail?.source;
+      if (thumb) {
+        cache.set(cacheKey, thumb);
+        return thumb;
+      }
+    } catch (_) {
+      // Wikipedia unavailable — skip silently
+    }
+  }
+
+  cache.set(cacheKey, null);
+  return null;
+}
+
+function isPhotoWorthy(item) {
+  const text = `${item?.place || ""} ${item?.comment || ""}`.toLowerCase();
+  if (/(транспорт|переезд|трансфер|поезд|автобус|такси|метро)/i.test(text)) return false;
+  if (/(отел|гостиниц|апартамент|хостел|размещени|ночлег)/i.test(text)) return false;
+  if (/(питание|обед в городе|ужин в городе)$/i.test(String(item?.place || "").trim())) return false;
+  return true;
+}
+
+async function enrichPlanWithImages(plan, { maxImages = 20 } = {}) {
+  if (!plan || !Array.isArray(plan.days)) return plan;
+
+  const cache = new Map();
+  let fetched = 0;
+
+  for (const day of plan.days) {
+    if (!Array.isArray(day.items)) continue;
+    for (const item of day.items) {
+      if (fetched >= maxImages) break;
+      if (!isPhotoWorthy(item)) continue;
+      const place = String(item.place || "").trim();
+      if (!place || place.length < 4) continue;
+
+      const imageUrl = await fetchPlaceImage(place, day.city || "", cache);
+      fetched += 1;
+      if (imageUrl) {
+        item.imageUrl = imageUrl;
+      }
+    }
+  }
+
+  return plan;
+}
+
 async function enrichPlanWithDayMaps(plan) {
   const normalized = { ...plan };
   const geocodeCache = new Map();
@@ -1588,6 +1660,7 @@ app.post("/api/plan", async (req, res) => {
         hasOwnCar
       });
       normalized = await enrichPlanWithDayMaps(normalized);
+      normalized = await enrichPlanWithImages(normalized);
       normalized.preferences = {
         needAccommodation: hasAccommodation,
         hasOwnCar: Boolean(hasOwnCar),
@@ -1694,6 +1767,7 @@ app.post("/api/plan", async (req, res) => {
         hasOwnCar
       });
       fallback = await enrichPlanWithDayMaps(fallback);
+      fallback = await enrichPlanWithImages(fallback);
       fallback.generatedWith = "fallback";
       fallback.fallbackReason = message;
       fallback.tips = [
