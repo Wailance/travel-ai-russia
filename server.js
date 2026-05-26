@@ -1005,72 +1005,129 @@ async function buildLogistics(routePoints, options = {}) {
   return { points, segments };
 }
 
-async function fetchPlaceImage(placeName, city, cache) {
-  const cacheKey = `${placeName}||${city}`.toLowerCase();
-  if (cache.has(cacheKey)) return cache.get(cacheKey);
+function cleanPlaceNameForSearch(placeName) {
+  return String(placeName || "")
+    .replace(/\(.*?\)/g, "")
+    .replace(/[«»""]/g, "")
+    .replace(/\s*,\s*/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
 
-  const queries = [
-    placeName,
-    `${placeName} ${city}`,
-    `${placeName} Россия`
-  ];
+function fetchWithTimeout(url, options = {}, timeoutMs = 6000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() =>
+    clearTimeout(timer)
+  );
+}
 
-  for (const query of queries) {
-    try {
-      const url =
-        `https://ru.wikipedia.org/w/api.php?action=query` +
-        `&titles=${encodeURIComponent(query)}` +
-        `&prop=pageimages&format=json&pithumbsize=480&redirects=1`;
-      const response = await fetch(url, {
-        headers: { "User-Agent": "travel-ai-russia/1.0" }
-      });
-      if (!response.ok) continue;
-      const data = await response.json();
-      const pages = data?.query?.pages;
-      if (!pages) continue;
-      const page = Object.values(pages)[0];
-      const thumb = page?.thumbnail?.source;
-      if (thumb) {
-        cache.set(cacheKey, thumb);
-        return thumb;
-      }
-    } catch (_) {
-      // Wikipedia unavailable — skip silently
+async function fetchImageViaSearch(query) {
+  const url =
+    `https://ru.wikipedia.org/w/api.php?action=query&generator=search` +
+    `&gsrsearch=${encodeURIComponent(query)}` +
+    `&gsrlimit=1&prop=pageimages&format=json&pithumbsize=480`;
+  const response = await fetchWithTimeout(url, {
+    headers: { "User-Agent": "travel-ai-russia/1.0" }
+  });
+  if (!response.ok) return null;
+  const data = await response.json();
+  const pages = data?.query?.pages;
+  if (!pages) return null;
+  const page = Object.values(pages)[0];
+  return page?.thumbnail?.source || null;
+}
+
+async function fetchImageViaTitles(titles) {
+  const url =
+    `https://ru.wikipedia.org/w/api.php?action=query` +
+    `&titles=${encodeURIComponent(titles)}` +
+    `&prop=pageimages&format=json&pithumbsize=480&redirects=1`;
+  const response = await fetchWithTimeout(url, {
+    headers: { "User-Agent": "travel-ai-russia/1.0" }
+  });
+  if (!response.ok) return {};
+  const data = await response.json();
+  const pages = data?.query?.pages || {};
+  const results = {};
+  for (const page of Object.values(pages)) {
+    if (page.thumbnail?.source && page.title) {
+      results[page.title.toLowerCase()] = page.thumbnail.source;
     }
   }
-
-  cache.set(cacheKey, null);
-  return null;
+  return results;
 }
 
 function isPhotoWorthy(item) {
   const text = `${item?.place || ""} ${item?.comment || ""}`.toLowerCase();
-  if (/(транспорт|переезд|трансфер|поезд|автобус|такси|метро)/i.test(text)) return false;
-  if (/(отел|гостиниц|апартамент|хостел|размещени|ночлег)/i.test(text)) return false;
-  if (/(питание|обед в городе|ужин в городе)$/i.test(String(item?.place || "").trim())) return false;
+  if (/(транспорт|переезд|трансфер|поезд|автобус|такси|метро|локальный транспорт)/i.test(text)) return false;
+  if (/(отел|гостиниц|апартамент|хостел|размещени|ночлег|hotel|inn|resort|azimut|ibis|novotel|holiday|hyatt|radisson|marriott|sheraton|cosmos)/i.test(text)) return false;
+  if (/^(питание|обед|ужин|завтрак)$/i.test(String(item?.place || "").trim())) return false;
   return true;
 }
 
-async function enrichPlanWithImages(plan, { maxImages = 20 } = {}) {
+async function enrichPlanWithImages(plan) {
   if (!plan || !Array.isArray(plan.days)) return plan;
 
-  const cache = new Map();
-  let fetched = 0;
-
+  const itemsToFetch = [];
   for (const day of plan.days) {
     if (!Array.isArray(day.items)) continue;
     for (const item of day.items) {
-      if (fetched >= maxImages) break;
       if (!isPhotoWorthy(item)) continue;
       const place = String(item.place || "").trim();
       if (!place || place.length < 4) continue;
+      itemsToFetch.push({ item, place, city: day.city || "" });
+    }
+  }
 
-      const imageUrl = await fetchPlaceImage(place, day.city || "", cache);
-      fetched += 1;
-      if (imageUrl) {
-        item.imageUrl = imageUrl;
+  if (!itemsToFetch.length) return plan;
+
+  const batchSize = 10;
+  const uniquePlaces = [...new Set(itemsToFetch.map((e) => cleanPlaceNameForSearch(e.place)))];
+  const imageCache = new Map();
+
+  for (let i = 0; i < uniquePlaces.length; i += batchSize) {
+    const batch = uniquePlaces.slice(i, i + batchSize);
+    const titlesQuery = batch.join("|");
+    try {
+      const batchResults = await fetchImageViaTitles(titlesQuery);
+      for (const [title, thumb] of Object.entries(batchResults)) {
+        imageCache.set(title, thumb);
+      }
+    } catch (_) {
+      // batch fetch failed — will try individually below
+    }
+  }
+
+  const searchPromises = itemsToFetch.map(async ({ item, place, city }) => {
+    const cleaned = cleanPlaceNameForSearch(place);
+    const cachedKey = Object.keys(Object.fromEntries(imageCache)).find(
+      (k) => k.includes(cleaned.toLowerCase().slice(0, 12)) ||
+             cleaned.toLowerCase().includes(k.slice(0, 12))
+    );
+    if (cachedKey) {
+      item.imageUrl = imageCache.get(cachedKey);
+      return;
+    }
+
+    const queries = [cleaned, `${cleaned} ${city}`];
+    for (const q of queries) {
+      try {
+        const thumb = await fetchImageViaSearch(q);
+        if (thumb) {
+          item.imageUrl = thumb;
+          imageCache.set(cleaned.toLowerCase(), thumb);
+          return;
+        }
+      } catch (_) {
+        // skip
       }
     }
+  });
+
+  const PARALLEL_LIMIT = 5;
+  for (let i = 0; i < searchPromises.length; i += PARALLEL_LIMIT) {
+    await Promise.allSettled(searchPromises.slice(i, i + PARALLEL_LIMIT));
   }
 
   return plan;
