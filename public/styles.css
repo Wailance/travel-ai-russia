@@ -1113,6 +1113,16 @@ li {
 
   }
 
+  input {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .goal-chip {
+    min-height: 44px;
+    font-size: 14px;
+  }
+
   .item {
     grid-template-columns: 1fr;
     gap: 4px;
