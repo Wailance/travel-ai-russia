@@ -1022,6 +1022,49 @@ function fetchWithTimeout(url, options = {}, timeoutMs = 6000) {
   );
 }
 
+function isLogoOrIcon(url) {
+  const lower = String(url || "").toLowerCase();
+  return /\.(svg|ico)(\?|$)/.test(lower) ||
+    /(logo|icon|emblem|coat.of.arms|flag_of|wappen|blason|herb_|gerb_|symbol|logotype|sign[_-])/i.test(lower);
+}
+
+async function fetchArticlePhoto(pageTitle) {
+  const url =
+    `https://ru.wikipedia.org/w/api.php?action=query` +
+    `&titles=${encodeURIComponent(pageTitle)}` +
+    `&prop=images&format=json&imlimit=10&redirects=1`;
+  try {
+    const response = await fetchWithTimeout(url, {
+      headers: { "User-Agent": "travel-ai-russia/1.0" }
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const pages = data?.query?.pages || {};
+    const page = Object.values(pages)[0];
+    const images = page?.images || [];
+    const candidates = images
+      .map((img) => img.title || "")
+      .filter((t) => /\.(jpg|jpeg|png|webp)$/i.test(t))
+      .filter((t) => !isLogoOrIcon(t));
+    if (!candidates.length) return null;
+
+    const thumbUrl =
+      `https://ru.wikipedia.org/w/api.php?action=query` +
+      `&titles=${encodeURIComponent(candidates[0])}` +
+      `&prop=imageinfo&iiprop=url&iiurlwidth=480&format=json`;
+    const thumbResp = await fetchWithTimeout(thumbUrl, {
+      headers: { "User-Agent": "travel-ai-russia/1.0" }
+    });
+    if (!thumbResp.ok) return null;
+    const thumbData = await thumbResp.json();
+    const thumbPages = thumbData?.query?.pages || {};
+    const thumbPage = Object.values(thumbPages)[0];
+    return thumbPage?.imageinfo?.[0]?.thumburl || thumbPage?.imageinfo?.[0]?.url || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function fetchImageViaSearch(query) {
   const url =
     `https://ru.wikipedia.org/w/api.php?action=query&generator=search` +
@@ -1035,7 +1078,10 @@ async function fetchImageViaSearch(query) {
   const pages = data?.query?.pages;
   if (!pages) return null;
   const page = Object.values(pages)[0];
-  return page?.thumbnail?.source || null;
+  const thumb = page?.thumbnail?.source || null;
+  if (thumb && !isLogoOrIcon(thumb)) return thumb;
+  if (page?.title) return fetchArticlePhoto(page.title);
+  return null;
 }
 
 async function fetchImageViaTitles(titles) {
@@ -1052,7 +1098,9 @@ async function fetchImageViaTitles(titles) {
   const results = {};
   for (const page of Object.values(pages)) {
     if (page.thumbnail?.source && page.title) {
-      results[page.title.toLowerCase()] = page.thumbnail.source;
+      if (!isLogoOrIcon(page.thumbnail.source)) {
+        results[page.title.toLowerCase()] = page.thumbnail.source;
+      }
     }
   }
   return results;
