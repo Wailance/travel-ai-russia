@@ -613,25 +613,48 @@ button:disabled {
 }
 
 .item {
-
   display: grid;
-
   grid-template-columns: 72px 1fr auto;
-
   gap: 8px;
-
   font-size: 15px;
-
   padding: 8px 0;
-
   border-bottom: 1px dashed rgba(120, 140, 176, 0.28);
-
 }
 
 .item:last-child {
-
   border-bottom: none;
+}
 
+.item-details {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.item-photo-wrap {
+  flex-shrink: 0;
+  width: 120px;
+  height: 80px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(120, 160, 220, 0.25);
+}
+
+.item-photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.25s ease;
+}
+
+.item-photo:hover {
+  transform: scale(1.08);
+}
+
+.item-text {
+  flex: 1;
+  min-width: 0;
 }
 
 .price-note {
@@ -967,13 +990,19 @@ li {
   }
 
   .item {
-
     grid-template-columns: 1fr;
-
     gap: 4px;
-
     padding: 8px 0;
+  }
 
+  .item-details {
+    flex-direction: column;
+  }
+
+  .item-photo-wrap {
+    width: 100%;
+    height: 140px;
+    border-radius: 10px;
   }
 
   .day-map-iframe {

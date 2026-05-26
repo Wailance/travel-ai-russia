@@ -303,13 +303,21 @@ function renderPlan(plan) {
 
     (day.items || []).forEach((item) => {
       const row = document.createElement("div");
-      row.className = "item";
+      row.className = item.imageUrl ? "item item-with-photo" : "item";
+      const photoHtml = item.imageUrl
+        ? `<div class="item-photo-wrap"><img class="item-photo" src="${item.imageUrl}" alt="${item.place || ""}" loading="lazy" /></div>`
+        : "";
       row.innerHTML = `
-        <div>${item.time || ""}</div>
-        <div><strong>${item.place || ""}</strong><br>${item.comment || ""}${
-          item.priceNote ? `<br><span class="price-note">${item.priceNote}</span>` : ""
-        }</div>
-        <div>${formatRub(item.cost)}</div>
+        <div class="item-time">${item.time || ""}</div>
+        <div class="item-details">
+          ${photoHtml}
+          <div class="item-text">
+            <strong>${item.place || ""}</strong><br>${item.comment || ""}${
+              item.priceNote ? `<br><span class="price-note">${item.priceNote}</span>` : ""
+            }
+          </div>
+        </div>
+        <div class="item-cost">${formatRub(item.cost)}</div>
       `;
       dayBlock.appendChild(row);
     });
